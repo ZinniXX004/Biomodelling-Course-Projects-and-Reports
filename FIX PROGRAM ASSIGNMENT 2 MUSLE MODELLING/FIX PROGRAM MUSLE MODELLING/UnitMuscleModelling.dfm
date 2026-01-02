@@ -1,0 +1,384 @@
+object Form2: TForm2
+  Left = 0
+  Top = 0
+  Caption = 
+    '5023231017 - Jeremia Christ Immanuel Manalu - Hill Type Muscle M' +
+    'odelling Force Generation'
+  ClientHeight = 1018
+  ClientWidth = 1500
+  Color = clBtnFace
+  Font.Charset = DEFAULT_CHARSET
+  Font.Color = clWindowText
+  Font.Height = -12
+  Font.Name = 'Segoe UI'
+  Font.Style = []
+  TextHeight = 15
+  object ScrollBox1: TScrollBox
+    Left = 0
+    Top = 0
+    Width = 1500
+    Height = 1018
+    Align = alClient
+    Color = clBlack
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = clBlue
+    Font.Height = -12
+    Font.Name = 'Segoe UI'
+    Font.Style = []
+    ParentColor = False
+    ParentFont = False
+    TabOrder = 0
+    ExplicitWidth = 1494
+    ExplicitHeight = 1001
+    object Label2: TLabel
+      Left = 1047
+      Top = 20
+      Width = 209
+      Height = 20
+      Caption = 'F-L Relationship Output Value'
+      Color = clYellow
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clYellow
+      Font.Height = -15
+      Font.Name = 'Segoe UI'
+      Font.Style = [fsBold]
+      ParentColor = False
+      ParentFont = False
+    end
+    object Label3: TLabel
+      Left = 1045
+      Top = 348
+      Width = 211
+      Height = 20
+      Caption = 'F-V Relationship Output Value'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clYellow
+      Font.Height = -15
+      Font.Name = 'Segoe UI'
+      Font.Style = [fsBold]
+      ParentFont = False
+    end
+    object Chart1: TChart
+      Left = 257
+      Top = 20
+      Width = 752
+      Height = 309
+      Legend.CheckBoxes = True
+      Title.Font.Color = clAqua
+      Title.Font.Name = 'Arial Black'
+      Title.Text.Strings = (
+        'F-L Relationship Graph')
+      BottomAxis.LabelsFormat.Font.Color = clAqua
+      BottomAxis.Title.Caption = 'Force'
+      BottomAxis.Title.Font.Color = clAqua
+      LeftAxis.LabelsFormat.Font.Color = clAqua
+      LeftAxis.Title.Caption = 'Length'
+      LeftAxis.Title.Font.Color = clAqua
+      View3D = False
+      Color = 8421440
+      TabOrder = 0
+      DefaultCanvas = 'TGDIPlusCanvas'
+      ColorPaletteIndex = 13
+      object Series1: TLineSeries
+        HoverElement = [heCurrent]
+        SeriesColor = 8388672
+        Brush.BackColor = clDefault
+        Pointer.InflateMargins = True
+        Pointer.Style = psRectangle
+        XValues.Name = 'X'
+        XValues.Order = loAscending
+        YValues.Name = 'Y'
+        YValues.Order = loNone
+      end
+      object SeriesFL_Descending: TLineSeries
+        HoverElement = [heCurrent]
+        SeriesColor = clYellow
+        Brush.BackColor = clDefault
+        Pointer.InflateMargins = True
+        Pointer.Style = psRectangle
+        XValues.Name = 'X'
+        XValues.Order = loAscending
+        YValues.Name = 'Y'
+        YValues.Order = loNone
+      end
+      object SeriesVerticalLine: TLineSeries
+        HoverElement = [heCurrent]
+        SeriesColor = clRed
+        Brush.BackColor = clDefault
+        LinePen.Style = psDash
+        Pointer.InflateMargins = True
+        Pointer.Style = psRectangle
+        XValues.Name = 'X'
+        XValues.Order = loAscending
+        YValues.Name = 'Y'
+        YValues.Order = loNone
+      end
+    end
+    object Chart2: TChart
+      Left = 257
+      Top = 347
+      Width = 752
+      Height = 326
+      Legend.CheckBoxes = True
+      Title.Font.Color = clYellow
+      Title.Font.Name = 'Arial MT Black'
+      Title.Text.Strings = (
+        'F-V Relationship Graph')
+      BottomAxis.LabelsFormat.Font.Color = clYellow
+      BottomAxis.Title.Caption = 'Velocity'
+      BottomAxis.Title.Font.Color = clYellow
+      LeftAxis.LabelsFormat.Font.Color = clYellow
+      LeftAxis.Title.Caption = 'Force'
+      LeftAxis.Title.Font.Color = clYellow
+      View3D = False
+      Color = clOlive
+      TabOrder = 1
+      DefaultCanvas = 'TGDIPlusCanvas'
+      ColorPaletteIndex = 13
+      object Series2: TLineSeries
+        HoverElement = [heCurrent]
+        SeriesColor = clAqua
+        Title = 'Concentric'
+        Brush.BackColor = clDefault
+        Pointer.InflateMargins = True
+        Pointer.Style = psRectangle
+        XValues.Name = 'X'
+        XValues.Order = loAscending
+        YValues.Name = 'Y'
+        YValues.Order = loNone
+      end
+      object Series3: TLineSeries
+        HoverElement = [heCurrent]
+        SeriesColor = 16744703
+        Title = 'Eccentric'
+        Brush.BackColor = clDefault
+        Pointer.InflateMargins = True
+        Pointer.Style = psRectangle
+        XValues.Name = 'X'
+        XValues.Order = loAscending
+        YValues.Name = 'Y'
+        YValues.Order = loNone
+      end
+      object SeriesVerticalLine_FV: TLineSeries
+        HoverElement = [heCurrent]
+        SeriesColor = clRed
+        Brush.BackColor = clDefault
+        Pointer.InflateMargins = True
+        Pointer.Style = psRectangle
+        XValues.Name = 'X'
+        XValues.Order = loAscending
+        YValues.Name = 'Y'
+        YValues.Order = loNone
+      end
+    end
+    object ListBox1: TListBox
+      Left = 1015
+      Top = 40
+      Width = 266
+      Height = 289
+      Color = clBlue
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clYellow
+      Font.Height = -12
+      Font.Name = 'Segoe UI'
+      Font.Style = []
+      ItemHeight = 15
+      ParentFont = False
+      TabOrder = 2
+    end
+    object ListBox2: TListBox
+      Left = 1015
+      Top = 368
+      Width = 266
+      Height = 305
+      Color = clBlue
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clYellow
+      Font.Height = -12
+      Font.Name = 'Segoe UI'
+      Font.Style = []
+      ItemHeight = 15
+      ParentFont = False
+      TabOrder = 3
+    end
+    object GroupBox1: TGroupBox
+      Left = 8
+      Top = 3
+      Width = 243
+      Height = 670
+      Caption = 'Buttons and Controls'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clAqua
+      Font.Height = -20
+      Font.Name = 'Segoe UI'
+      Font.Style = []
+      ParentFont = False
+      TabOrder = 4
+      object Label1: TLabel
+        Left = 54
+        Top = 32
+        Width = 32
+        Height = 20
+        Caption = 'Lopt'
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clBlue
+        Font.Height = -15
+        Font.Name = 'Segoe UI'
+        Font.Style = [fsBold]
+        ParentFont = False
+      end
+      object BitBtn1: TBitBtn
+        Left = 152
+        Top = 32
+        Width = 88
+        Height = 514
+        Caption = '&EXIT'
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clRed
+        Font.Height = -20
+        Font.Name = 'Segoe UI'
+        Font.Style = [fsBold]
+        Kind = bkClose
+        NumGlyphs = 2
+        ParentFont = False
+        TabOrder = 0
+        OnClick = BitBtn1Click
+      end
+      object Button1: TButton
+        Left = 3
+        Top = 95
+        Width = 70
+        Height = 154
+        Caption = 'f(l)'
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clAqua
+        Font.Height = -20
+        Font.Name = 'Segoe UI'
+        Font.Style = [fsBold]
+        ParentFont = False
+        TabOrder = 1
+        OnClick = Button1Click
+      end
+      object Button2: TButton
+        Left = 79
+        Top = 95
+        Width = 67
+        Height = 154
+        Caption = 'f(v)'
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clAqua
+        Font.Height = -20
+        Font.Name = 'Segoe UI'
+        Font.Style = [fsBold]
+        ParentFont = False
+        TabOrder = 2
+        OnClick = Button2Click
+      end
+      object Button3: TButton
+        Left = 3
+        Top = 447
+        Width = 143
+        Height = 99
+        Caption = 'Clear'
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clAqua
+        Font.Height = -20
+        Font.Name = 'Segoe UI'
+        Font.Style = [fsBold]
+        ParentFont = False
+        TabOrder = 3
+        OnClick = Button3Click
+      end
+      object Button4: TButton
+        Left = 3
+        Top = 351
+        Width = 143
+        Height = 90
+        Caption = 'Save'
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clAqua
+        Font.Height = -20
+        Font.Name = 'Segoe UI'
+        Font.Style = [fsBold]
+        ParentFont = False
+        TabOrder = 4
+        OnClick = Button4Click
+      end
+      object Button5: TButton
+        Left = 3
+        Top = 255
+        Width = 143
+        Height = 90
+        Caption = 'Load'
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clAqua
+        Font.Height = -20
+        Font.Name = 'Segoe UI'
+        Font.Style = [fsBold]
+        ParentFont = False
+        TabOrder = 5
+        OnClick = Button5Click
+      end
+      object Edit1: TEdit
+        Left = 3
+        Top = 58
+        Width = 143
+        Height = 28
+        Alignment = taCenter
+        Color = clBlue
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clYellow
+        Font.Height = -15
+        Font.Name = 'Segoe UI'
+        Font.Style = []
+        ParentFont = False
+        TabOrder = 6
+        Text = '1'
+      end
+      object ButtonForceGeneration: TButton
+        AlignWithMargins = True
+        Left = 3
+        Top = 552
+        Width = 237
+        Height = 50
+        Caption = 'Force '#13#10'Generation '#13#10'Model'
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clAqua
+        Font.Height = -20
+        Font.Name = 'Segoe UI'
+        Font.Style = [fsBold]
+        ImageAlignment = iaCenter
+        ParentFont = False
+        TabOrder = 7
+        OnClick = ButtonForceGenerationClick
+      end
+      object ButtonHillTypeMuscleModel: TButton
+        Left = 3
+        Top = 608
+        Width = 237
+        Height = 59
+        Caption = 'Hill-Type Muscle Model'
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clAqua
+        Font.Height = -20
+        Font.Name = 'Segoe UI'
+        Font.Style = [fsBold]
+        ParentFont = False
+        TabOrder = 8
+        OnClick = ButtonHillTypeMuscleModelClick
+      end
+    end
+  end
+  object SaveDialog1: TSaveDialog
+    Left = 384
+    Top = 688
+  end
+  object OpenDialog1: TOpenDialog
+    Left = 320
+    Top = 688
+  end
+  object OpenDialog2: TOpenDialog
+    Left = 248
+    Top = 688
+  end
+end
