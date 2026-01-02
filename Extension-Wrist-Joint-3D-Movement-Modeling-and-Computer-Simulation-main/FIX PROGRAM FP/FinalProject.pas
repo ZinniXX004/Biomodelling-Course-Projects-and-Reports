@@ -1,0 +1,873 @@
+unit FinalProject;
+
+interface
+
+uses
+  Winapi.Windows, Winapi.Messages, Winapi.OpenGL, System.SysUtils,
+  System.Variants, System.Classes, Vcl.Graphics, Vcl.Controls, Vcl.Forms,
+  Vcl.Dialogs, Vcl.StdCtrls, Vcl.ExtCtrls, Vcl.ComCtrls, Vcl.Buttons,
+  VCLTee.TeEngine, VCLTee.Series, VCLTee.TeeProcs, VCLTee.Chart,
+  VclTee.TeeGDIPlus, Vcl.Samples.Spin, Math, MotionEquationUpperLimb;
+
+type
+  TFormWristJoint = class(TForm)
+    // --- Layout Components ---
+    PanelLeft: TPanel;
+    PanelRight: TPanel;
+    PanelGL: TPanel;
+    PanelControls: TPanel;
+    Splitter1: TSplitter;
+    ScrollBoxCharts: TScrollBox;
+
+    // --- Charts ---
+    Chart1: TChart; Series1: TLineSeries; Series2: TLineSeries;
+    Chart2: TChart; Series3: TLineSeries; Series4: TLineSeries;
+    Chart3: TChart; Series5: TLineSeries; Series6: TLineSeries;
+    Chart4: TChart; Series7: TLineSeries; Series8: TLineSeries;
+    Chart5: TChart; Series9: TPointSeries; Series10: TPointSeries;
+
+    // --- Simulation Controls ---
+    GrpSimulation: TGroupBox;
+    BtnFrontal: TButton;
+    BtnSagital: TButton;
+    BtnBoth: TButton;
+    BtnReset: TButton;
+    BtnSave: TButton;
+    btnEqFig: TButton;
+    RadioActive: TRadioButton;
+    RadioPassive: TRadioButton;
+    LblRMSE: TLabel;
+    EditRMSE: TEdit;
+
+    // --- PID Parameter Controls (NEW) ---
+    GrpPID: TGroupBox;
+    LabelKp: TLabel; LabelTi: TLabel; LabelTd: TLabel;
+    EdKp: TEdit; EdTi: TEdit; EdTd: TEdit;
+
+    // --- Camera Controls (Refined) ---
+    GrpCamera: TGroupBox;
+    LabelYaw: TLabel; LabelPitch: TLabel; LabelRoll: TLabel;
+    seYaw: TSpinEdit; sePitch: TSpinEdit; seRoll: TSpinEdit;
+    BtnResetCamera: TButton;
+
+    // --- Timers & Dialogs ---
+    TimerRender: TTimer;
+    TimerPhysics: TTimer;
+    SaveDialog1: TSaveDialog;
+    Label1: TLabel;
+    Label2: TLabel;
+    Label3: TLabel;
+    BitBtn1: TBitBtn;
+
+    // --- Event Handlers ---
+    procedure FormCreate(Sender: TObject);
+    procedure FormDestroy(Sender: TObject);
+    procedure FormResize(Sender: TObject);
+    procedure FormShow(Sender: TObject);
+
+    // Logic Events
+    procedure BtnFrontalClick(Sender: TObject);
+    procedure BtnSagitalClick(Sender: TObject);
+    procedure BtnBothClick(Sender: TObject);
+    procedure BtnResetClick(Sender: TObject);
+    procedure BtnSaveClick(Sender: TObject);
+    procedure TimerRenderTimer(Sender: TObject);
+    procedure TimerPhysicsTimer(Sender: TObject);
+    procedure btnEqFigClick(Sender: TObject);
+
+    // Camera Events
+    procedure seYawChange(Sender: TObject);
+    procedure sePitchChange(Sender: TObject);
+    procedure seRollChange(Sender: TObject);
+    procedure BtnResetCameraClick(Sender: TObject);
+
+  private
+    { OpenGL Variables }
+    DC: HDC;
+    RC: HGLRC;
+    Sphere, Cylinder: GLUquadricObj;
+
+    { Camera Variables }
+    camPitch, camYaw, camRoll: Double;
+    camX, camY, camZ: Double;
+
+    { Visualization Variables }
+    rotangle1, rotangle2, rotangle3: Double; // Finger animations
+
+    { Physics Variables (From UpperLimb Logic) }
+    // Sagittal (Flexion/Extension)
+    theta, thetadot, thetadotdot: real;
+    phi, phidot, phidotdot: real;
+
+    // Frontal (Radial/Ulnar)
+    theta2, thetadot2, thetadotdot2: real;
+    phi2, phidot2, phidotdot2: real;
+
+    // RK4 Variables
+    k1, k2, k3, k4, k11, k21, k31, k41: real;
+
+    // System Params
+    m, lgth, g: real;
+    dt, BW, BH: real;
+    damping_factor, stiffness: real;
+    time: real;
+
+    // Control Variables
+    reald, realu: real; // Realized angles
+    itg1, itg2: real;   // Integrators
+    errdb, errub: real; // Previous errors
+    errd, erru: real;   // Current errors
+    deriv1, deriv2: real; // Derivatives
+
+    // Target Angles for Visualization
+    rotanglee, rotangleee: real; // Frontal & Sagittal targets (Degrees)
+
+    // RMSE
+    rmse, rmsee, rmseee: real;
+
+    SimMode: Integer; // 0:None, 1:Sagittal, 2:Frontal, 3:Both
+
+    { OpenGL Helper Procedures }
+    procedure InitOpenGL;
+    procedure SetupLighting;
+    procedure CleanupOpenGL;
+    procedure RenderScene;
+    procedure DrawArmAndHand;
+    procedure DrawBox(w, h, d: GLfloat);
+    procedure DrawAxis(Length: Single);
+
+    { Physics Helper Procedures }
+    function ReadPID(Ed: TEdit; DefaultVal: Double): Double;
+    procedure single_pend_equ(thetaa, thetadota, phia, phidota: real);
+    procedure rungekutta1(thetab, thetadotb, phib, phidotb: real);
+    procedure single_pend_equ2(thetaa, thetadota, phia, phidota: real);
+    procedure rungekutta2(thetab, thetadotb, phib, phidotb: real);
+
+  public
+  end;
+
+const
+  // BIOMODELLING: Material properties for skin (Matte)
+  mat_specular : array [0..3] of GLfloat = ( 0.2, 0.2, 0.2, 1.0 );
+  mat_shininess : GLfloat = 10.0;
+  light_position : array [0..3] of GLfloat = ( 50.0, 50.0, 50.0, 1.0 );
+
+var
+  FormWristJoint: TFormWristJoint;
+
+implementation
+
+{$R *.dfm}
+
+// Import OpenGL Texture function (Standard Template)
+procedure glBindTexture(target: GLenum; texture: GLuint); stdcall; external opengl32;
+
+// --- Helper Functions ---
+
+function TFormWristJoint.ReadPID(Ed: TEdit; DefaultVal: Double): Double;
+begin
+  try
+    Result := StrToFloat(StringReplace(Ed.Text, ',', '.', [rfReplaceAll]));
+  except
+    Result := DefaultVal;
+  end;
+end;
+
+// --- Physics Equations (Single Pendulum Logic) ---
+procedure TFormWristJoint.single_pend_equ(thetaa, thetadota, phia, phidota: real);
+begin
+  if RadioPassive.Checked then
+  begin
+    // Mode Passive:
+    thetadotdot := phidota*phidota*sin(thetaa)*cos(thetaa) - 1.5 * (g/lgth)*sin(thetaa) - damping_factor * thetadota - stiffness * thetaa;
+    phidotdot := -2*phidota*thetadota*cos(thetaa);
+  end
+  else
+  begin
+    // Mode Active:
+    thetadotdot := phidota*phidota*sin(thetaa)*cos(thetaa) - 1.5 * (g/lgth)*sin(thetaa) - stiffness * thetaa;
+    phidotdot := -2*phidota*thetadota*cos(thetaa);
+  end;
+end;
+
+procedure TFormWristJoint.single_pend_equ2(thetaa, thetadota, phia, phidota: real);
+begin
+  if RadioPassive.Checked then
+  begin
+    // Mode Passive
+    thetadotdot2 := phidota*phidota*sin(thetaa)*cos(thetaa) - 1.5 * (g/lgth)*sin(thetaa) - damping_factor * thetadota - stiffness * thetaa;
+    phidotdot2 := -2*phidota*thetadota*cos(thetaa);
+  end
+  else
+  begin
+    // Mode Active:
+    thetadotdot2 := phidota*phidota*sin(thetaa)*cos(thetaa) - 1.5 * (g/lgth)*sin(thetaa) - stiffness * thetaa;
+    phidotdot2 := -2*phidota*thetadota*cos(thetaa);
+  end;
+end;
+
+procedure TFormWristJoint.rungekutta1(thetab, thetadotb, phib, phidotb: real);
+begin
+  single_pend_equ(thetab, thetadotb, phib, phidotb);
+  k1  := 0.5 * dt * thetadotdot;
+  k11 := 0.5 * dt * phidotdot;
+
+  single_pend_equ(thetab + 0.5 * dt * (thetadotb + 0.5 * k1), thetadotb + k1, phib + 0.5 * dt * (phidotb + 0.5 * k11), phidotb + k11);
+  k2  := 0.5 * dt * thetadotdot;
+  k21 := 0.5 * dt * phidotdot;
+
+  single_pend_equ(thetab + 0.5 * dt * (thetadotb + 0.5 * k1), thetadotb + k2, phib + 0.5 * dt * (phidotb + 0.5 * k11), phidotb + k21);
+  k3  := 0.5 * dt * thetadotdot;
+  k31 := 0.5 * dt * phidotdot;
+
+  single_pend_equ(thetab + dt * (thetadotb + k3), thetadotb + 2 * k3, phib + dt * (phidotb + k31), phidotb + 2 * k31);
+  k4  := 0.5 * dt * thetadotdot;
+  k41 := 0.5 * dt * phidotdot;
+
+  theta    := theta + dt * (thetadot + 1/3 * (k1 + k2 + k3));
+  thetadot := thetadot + 1/3 * (k1 + 2 * k2 + 2 * k3 + k4);
+
+  phi    := phi + dt * (phidot + 1/3 * (k11 + k21 + k31));
+  phidot := phidot + 1/3 * (k11 + 2 * k21 + 2 * k31 + k41);
+end;
+
+procedure TFormWristJoint.rungekutta2(thetab, thetadotb, phib, phidotb: real);
+begin
+  single_pend_equ2(thetab, thetadotb, phib, phidotb);
+  k1  := 0.5 * dt * thetadotdot2;
+  k11 := 0.5 * dt * phidotdot2;
+
+  single_pend_equ2(thetab + 0.5 * dt * (thetadotb + 0.5 * k1), thetadotb + k1, phib + 0.5 * dt * (phidotb + 0.5 * k11), phidotb + k11);
+  k2  := 0.5 * dt * thetadotdot2;
+  k21 := 0.5 * dt * phidotdot2;
+
+  single_pend_equ2(thetab + 0.5 * dt * (thetadotb + 0.5 * k1), thetadotb + k2, phib + 0.5 * dt * (phidotb + 0.5 * k11), phidotb + k21);
+  k3  := 0.5 * dt * thetadotdot2;
+  k31 := 0.5 * dt * phidotdot2;
+
+  single_pend_equ2(thetab + dt * (thetadotb + k3), thetadotb + 2 * k3, phib + dt * (phidotb + k31), phidotb + 2 * k31);
+  k4  := 0.5 * dt * thetadotdot2;
+  k41 := 0.5 * dt * phidotdot2;
+
+  theta2    := theta2 + dt * (thetadot2 + 1/3 * (k1 + k2 + k3));
+  thetadot2 := thetadot2 + 1/3 * (k1 + 2 * k2 + 2 * k3 + k4);
+
+  phi2    := phi2 + dt * (phidot2 + 1/3 * (k11 + k21 + k31));
+  phidot2 := phidot2 + 1/3 * (k11 + 2 * k21 + 2 * k31 + k41);
+end;
+
+procedure TFormWristJoint.TimerPhysicsTimer(Sender: TObject);
+var
+  Kp_Val, Ti_Val, Td_Val: Double;
+begin
+  // 1. Get User PID Inputs
+  Kp_Val := ReadPID(EdKp, 0.6);
+  Ti_Val := ReadPID(EdTi, 0.01);
+  Td_Val := ReadPID(EdTd, 0.005);
+
+  // 2. Physics Step
+  // Animasi jari (Simulasi saraf/movement kecil)
+  rotangle1 := 45 * abs(sin(0.01 * time));
+  rotangle2 := 30 + 10 * sin(3 * time + 0.5);
+  rotangle3 := 10 + 5 * sin(3 * time + 1.0);
+
+  // A. Urus Sagital (Theta - Flexion/Extension)
+  if (SimMode = 1) or (SimMode = 3) then
+  begin
+    rungekutta1(theta, thetadot, phi, phidot);
+  end
+  else
+  begin
+    // Return to neutral
+    theta := 0;
+    thetadot := 0;
+  end;
+
+  // B. Urus Frontal (Theta2 - Radial/Ulnar)
+  if (SimMode = 2) or (SimMode = 3) then
+  begin
+    rungekutta2(theta2, thetadot2, phi2, phidot2);
+  end
+  else
+  begin
+    // Return to neutral
+    theta2 := 0;
+    thetadot2 := 0;
+  end;
+
+  // 3. Conversion to Degrees for Chart
+  rotanglee  := theta2 * 180 / pi;  // Frontal (Target)
+  rotangleee := theta * 180 / pi;   // Sagital (Target)
+
+  // 4. PID Control Loop
+  // Calculate Errors
+  errd := rotangleee - reald; // Sagital Error
+  erru := rotanglee - realu;  // Frontal Error
+
+  itg1 := itg1 + errd * dt;
+  itg2 := itg2 + erru * dt;
+
+  deriv1 := (errd - errdb) / dt;
+  deriv2 := (erru - errub) / dt;
+
+  // Apply PID if mode is active
+  if (SimMode = 1) or (SimMode = 3) then
+     reald := reald + Kp_Val * errd + Ti_Val * itg1 + Td_Val * deriv1
+  else
+     reald := reald * 0.90;
+
+  if (SimMode = 2) or (SimMode = 3) then
+     realu := realu + Kp_Val * erru + Ti_Val * itg2 + Td_Val * deriv2
+  else
+     realu := realu * 0.90;
+
+  // Update Previous Errors
+  errub := erru;
+  errdb := errd;
+
+  // 5. Update Charts
+  // --- GRAFIK FRONTAL (Hanya jika Mode 2 atau 3) ---
+  if (SimMode = 2) or (SimMode = 3) then
+  begin
+    Series1.AddXY(time, rotanglee); // Target Frontal
+    Series2.AddXY(time, realu);     // Real Frontal
+  end;
+
+  // --- GRAFIK SAGITAL (Hanya jika Mode 1 atau 3) ---
+  if (SimMode = 1) or (SimMode = 3) then
+  begin
+    Series3.AddXY(time, rotangleee); // Target Sagital
+    Series4.AddXY(time, reald);      // Real Sagital
+  end;
+
+  Series6.AddXY(time, deriv2);    // Torque Frontal
+  Series8.AddXY(time, erru);      // Error Frontal
+  Series5.AddXY(time, deriv1);     // Torque Sagittal
+  Series7.AddXY(time, errd);       // Error Sagittal
+
+  if SimMode = 3 then
+  begin
+    Series9.AddXY(rotanglee, rotangleee);
+    Series10.AddXY(realu, reald);
+  end;
+
+  // 6. RMSE Calculation
+  rmse := rmse + sqr((erru + errd) / 2);
+  if time > 0 then
+  begin
+    rmseee := rmse / (time/dt); // Average over steps
+    rmsee  := sqrt(rmseee);
+    EditRMSE.Text := FormatFloat('0.000', rmsee);
+  end;
+
+  time := time + dt;
+end;
+
+// --- Form & Control Events ---
+
+procedure TFormWristJoint.FormCreate(Sender: TObject);
+begin
+  // Set Defaults
+  camPitch := 10;
+  camYaw   := 45;
+  camRoll  := 0;
+
+  camX := 0;
+  camY := 0;
+  camZ := -150; // Zoom out to see full arm
+
+  sePitch.Value := Round(camPitch);
+  seYaw.Value := Round(camYaw);
+  seRoll.Value := Round(camRoll);
+
+  BtnResetClick(Self);
+end;
+
+procedure TFormWristJoint.BtnResetClick(Sender: TObject);
+begin
+  time := 0;
+  theta := 30 * pi / 180; // Initial displacement
+  phi := 0;
+  thetadot := 0;
+  phidot := 0;
+
+  theta2 := 0; // Frontal start neutral
+  phi2 := 0;
+  thetadot2 := 2.0; // Initial velocity impulse for Frontal
+  phidot2 := 0;
+
+  BW := 60;
+  BH := 160;
+  g := 9.8;
+  lgth := 0.517;
+  m := 0.006 * BW + 0.054;
+
+  dt := 0.01;
+  reald := 0;
+  realu := 0;
+  itg1 := 0;
+  itg2 := 0;
+
+  errdb := 0;
+  errub := 0;
+  rmse := 0;
+
+  Series1.Clear; Series2.Clear; Series3.Clear; Series4.Clear;
+  Series5.Clear; Series6.Clear; Series7.Clear; Series8.Clear;
+  Series9.Clear; Series10.Clear;
+
+  SimMode := 0;
+  TimerPhysics.Enabled := False;
+  BtnFrontal.Caption := 'Frontal';
+  BtnSagital.Caption := 'Sagital';
+  BtnBoth.Caption := 'Combined';
+
+  BtnFrontal.Enabled := True;
+  BtnSagital.Enabled := True;
+  BtnBoth.Enabled := True;
+end;
+
+procedure TFormWristJoint.BtnFrontalClick(Sender: TObject);
+begin
+  if not TimerPhysics.Enabled then
+  begin
+    SimMode := 2;
+    TimerPhysics.Enabled := True;
+    BtnFrontal.Caption := 'Stop';
+    damping_factor := 0.5;
+    BtnSagital.Enabled := False;
+    BtnBoth.Enabled := False;
+  end
+  else
+  begin
+    TimerPhysics.Enabled := False;
+    BtnFrontal.Caption := 'Frontal';
+    BtnSagital.Enabled := True;
+    BtnBoth.Enabled := True;
+  end;
+end;
+
+procedure TFormWristJoint.BtnSagitalClick(Sender: TObject);
+begin
+  if not TimerPhysics.Enabled then
+  begin
+    SimMode := 1;
+    TimerPhysics.Enabled := True;
+    BtnSagital.Caption := 'Stop';
+    damping_factor := 0.7;
+    BtnFrontal.Enabled := False;
+    BtnBoth.Enabled := False;
+  end
+  else
+  begin
+    TimerPhysics.Enabled := False;
+    BtnSagital.Caption := 'Sagital';
+    BtnFrontal.Enabled := True;
+    BtnBoth.Enabled := True;
+  end;
+end;
+
+procedure TFormWristJoint.BtnBothClick(Sender: TObject);
+begin
+  if not TimerPhysics.Enabled then
+  begin
+    SimMode := 3;
+    TimerPhysics.Enabled := True;
+    BtnBoth.Caption := 'Stop';
+    stiffness := 2.0;
+    damping_factor := 0.6;
+    BtnFrontal.Enabled := False;
+    BtnSagital.Enabled := False;
+  end
+  else
+  begin
+    TimerPhysics.Enabled := False;
+    BtnBoth.Caption := 'Combined';
+    BtnFrontal.Enabled := True;
+    BtnSagital.Enabled := True;
+  end;
+end;
+
+procedure TFormWristJoint.BtnSaveClick(Sender: TObject);
+var SaveFile: TextFile; i: Integer;
+begin
+  if SaveDialog1.Execute then
+  begin
+    AssignFile(SaveFile, SaveDialog1.FileName);
+    Rewrite(SaveFile);
+    WriteLn(SaveFile, 'Time|T_Front|R_Front|T_Sag|R_Sag|Tau1|Tau2|Err1|Err2');
+    for i := 0 to Series1.Count - 1 do
+      WriteLn(SaveFile, Format('%.4f|%.4f|%.4f|%.4f|%.4f|%.4f|%.4f|%.4f|%.4f', [
+        Series1.XValue[i], Series1.YValue[i], Series2.YValue[i],
+        Series3.YValue[i], Series4.YValue[i], Series5.YValue[i],
+        Series6.YValue[i], Series7.YValue[i], Series8.YValue[i]]));
+    CloseFile(SaveFile);
+  end;
+end;
+
+procedure TFormWristJoint.btnEqFigClick(Sender: TObject);
+begin
+  if Assigned(Form2) then Form2.Show;
+end;
+
+// --- OpenGL Implementation ---
+
+procedure TFormWristJoint.InitOpenGL;
+var pfd: TPIXELFORMATDESCRIPTOR; pf: Integer;
+begin
+  DC := GetDC(PanelGL.Handle);
+  FillChar(pfd, SizeOf(pfd), 0);
+  pfd.nSize := SizeOf(pfd); pfd.nVersion := 1;
+  pfd.dwFlags := PFD_DRAW_TO_WINDOW or PFD_SUPPORT_OPENGL or PFD_DOUBLEBUFFER;
+  pfd.iPixelType := PFD_TYPE_RGBA; pfd.cColorBits := 24; pfd.cDepthBits := 24;
+  pf := ChoosePixelFormat(DC, @pfd);
+  SetPixelFormat(DC, pf, @pfd);
+  RC := wglCreateContext(DC);
+  wglMakeCurrent(DC, RC);
+
+  glEnable(GL_DEPTH_TEST);
+  glClearColor(0.15, 0.15, 0.15, 1.0);
+  glShadeModel(GL_SMOOTH);
+
+  SetupLighting;
+
+  Sphere := gluNewQuadric;
+  Cylinder := gluNewQuadric;
+  gluQuadricNormals(Sphere, GLU_SMOOTH);
+  gluQuadricNormals(Cylinder, GLU_SMOOTH);
+end;
+
+procedure TFormWristJoint.SetupLighting;
+begin
+  glEnable(GL_LIGHTING);
+  glEnable(GL_LIGHT0);
+  glEnable(GL_COLOR_MATERIAL);
+  glColorMaterial(GL_FRONT, GL_AMBIENT_AND_DIFFUSE);
+
+  glMaterialfv(GL_FRONT, GL_SPECULAR, @mat_specular);
+  glMaterialfv(GL_FRONT, GL_SHININESS, @mat_shininess);
+  glLightfv(GL_LIGHT0, GL_POSITION, @light_position);
+end;
+
+procedure TFormWristJoint.CleanupOpenGL;
+begin
+  if Assigned(Sphere) then gluDeleteQuadric(Sphere);
+  if RC <> 0 then begin
+    wglMakeCurrent(0, 0);
+    wglDeleteContext(RC);
+  end;
+  if DC <> 0 then ReleaseDC(PanelGL.Handle, DC);
+end;
+
+// Geometric Primitives from Reference
+procedure TFormWristJoint.DrawBox(w, h, d: GLfloat);
+begin
+  glPushMatrix;
+  glScalef(w, h, d);
+  glBegin(GL_QUADS);
+    // Depan (Z+)
+    glNormal3f(0, 0, 1);
+    glVertex3f(-0.5, -0.5, 0.5);
+    glVertex3f(0.5, -0.5, 0.5);
+    glVertex3f(0.5, 0.5, 0.5);
+    glVertex3f(-0.5, 0.5, 0.5);
+    // Belakang (Z-)
+    glNormal3f(0, 0, -1);
+    glVertex3f(-0.5, -0.5, -0.5);
+    glVertex3f(-0.5, 0.5, -0.5);
+    glVertex3f(0.5, 0.5, -0.5);
+    glVertex3f(0.5, -0.5, -0.5);
+    // Atas (Y+)
+    glNormal3f(0, 1, 0);
+    glVertex3f(-0.5, 0.5, -0.5);
+    glVertex3f(-0.5, 0.5, 0.5);
+    glVertex3f(0.5, 0.5, 0.5);
+    glVertex3f(0.5, 0.5, -0.5);
+    // Bawah (Y-)
+    glNormal3f(0, -1, 0);
+    glVertex3f(-0.5, -0.5, -0.5);
+    glVertex3f(0.5, -0.5, -0.5);
+    glVertex3f(0.5, -0.5, 0.5);
+    glVertex3f(-0.5, -0.5, 0.5);
+    // Kanan (X+)
+    glNormal3f(1, 0, 0);
+    glVertex3f(0.5, -0.5, -0.5);
+    glVertex3f(0.5, 0.5, -0.5);
+    glVertex3f(0.5, 0.5, 0.5);
+    glVertex3f(0.5, -0.5, 0.5);
+    // Kiri (X-)
+    glNormal3f(-1, 0, 0);
+    glVertex3f(-0.5, -0.5, -0.5);
+    glVertex3f(-0.5, -0.5, 0.5);
+    glVertex3f(-0.5, 0.5, 0.5);
+    glVertex3f(-0.5, 0.5, -0.5);
+  glEnd;
+  glPopMatrix;
+end;
+
+procedure TFormWristJoint.DrawAxis(Length: Single);
+begin
+  glDisable(GL_LIGHTING);
+  glLineWidth(2.0);
+  glBegin(GL_LINES);
+    // X Axis - Merah (Lateral/Medial)
+    // Disini X: Kiri (-) Kanan (+)
+    glColor3f(1.0, 0.0, 0.0);
+    glVertex3f(-Length, 0, 0);
+    glVertex3f(Length, 0, 0);
+
+    // Y Axis - Hijau (Superior/Inferior)
+    // Y: Bawah (-) Atas (+)
+    glColor3f(0.0, 1.0, 0.0);
+    glVertex3f(0, -Length, 0);
+    glVertex3f(0, Length, 0);
+
+    // Z Axis - Biru (Anterior/Posterior)
+    // Z: Belakang (-) Depan (+)
+    glColor3f(0.0, 0.0, 1.0);
+    glVertex3f(0, 0, -Length);
+    glVertex3f(0, 0, Length);
+  glEnd;
+  glEnable(GL_LIGHTING);
+end;
+
+// --- BIOMODELLING RENDER ROUTINE ---
+procedure TFormWristJoint.DrawArmAndHand;
+var
+  // Dimensi Antropometri
+  radShoulder, radElbow, radWrist: Double;
+  lenUpper, lenLower: Double;
+
+  // Dimensi Tangan
+  palmThick, palmLength, palmWidth: Double;
+  fingerLen, fingerRad: Double;
+  i: Integer;
+begin
+  // Set Ukuran (Skala disesuaikan agar proporsional di layar)
+  radShoulder := 3.0;
+  radElbow    := 2.4;
+  radWrist    := 1.8;
+  lenUpper    := 26.0;
+  lenLower    := 24.0;
+
+  palmLength  := 9.0;
+  palmWidth   := 7.5;
+  palmThick   := 2.5;
+
+  // Skin Tone
+  glColor3f(0.75, 0.75, 0.75);
+
+  // --- 1. SHOULDER (Titik Pivot Utama 0,0,0) ---
+  gluSphere(sphere, radShoulder, 32, 32);
+
+  // --- 2. UPPER ARM (Humerus) ---
+  // Cylinder digambar ke arah Z+, kita putar ke Y- (Bawah)
+  glPushMatrix;
+    glRotatef(90, 1, 0, 0);
+    gluCylinder(Cylinder, radShoulder, radElbow, lenUpper, 32, 32);
+  glPopMatrix;
+
+  // Pindah ke Siku
+  glTranslatef(0, -lenUpper, 0);
+
+  // --- 3. ELBOW JOINT ---
+  gluSphere(Sphere, radElbow, 32, 32);
+
+  // --- 4. FOREARM (Radius/Ulna) ---
+  glPushMatrix;
+    glRotatef(90, 1, 0, 0);
+    gluCylinder(Cylinder, radElbow, radWrist, lenLower, 32, 32);
+  glPopMatrix;
+
+  // Pindah ke Pergelangan
+  glTranslatef(0, -lenLower, 0);
+
+  // --- 5. WRIST JOINT (Pivot Simulasi) ---
+  gluSphere(Sphere, radWrist, 24, 24);
+
+  // ======================================================
+  // SIMULASI GERAKAN WRIST (Single Pendulum Logic)
+  // ======================================================
+
+  // 1. Flexion/Extension (Sagittal) - rotation around X axis
+  // Karena telapak menghadap Medial (samping), flexion adalah putaran sumbu X
+  glRotatef(reald, 1, 0, 0);
+
+  // 2. Radial/Ulnar Deviation (Frontal) - rotation around Z axis
+  // Gerakan melambai ke depan/belakang relatif terhadap posisi berdiri
+  glRotatef(realu, 0, 0, 1);
+
+  // --- 6. HAND (PALM) ---
+  // Geser sedikit ke bawah agar mulai dari pergelangan
+  glTranslatef(0, -palmLength/2, 0);
+
+  // Gambar Telapak Tangan
+  // Orientasi: Berdiri Rileks -> Telapak menghadap Paha (Medial / -X)
+  // Maka Tebal ada di X, Lebar ada di Z, Panjang ada di Y.
+  DrawBox(palmThick, palmLength, palmWidth);
+
+  // Pindah ke ujung telapak (Knuckles) untuk menggambar jari
+  glTranslatef(0, -palmLength/2, 0);
+
+  // --- 7. JARI-JARI (FINGERS) ---
+  fingerRad := 0.55;
+
+  // Loop 4 jari (Telunjuk s/d Kelingking)
+  // Kita sebar sepanjang sumbu Z (Lebar tangan)
+  for i := 0 to 3 do
+  begin
+    glPushMatrix;
+      // Offset posisi jari (Z axis)
+      // i=0 (Telunjuk/Anterior), i=3 (Kelingking/Posterior)
+      glTranslatef(0, 0, (palmWidth * 0.35) - (i * (palmWidth * 0.23)));
+
+      // Variasi Panjang Jari
+      case i of
+        1: fingerLen := 7.5; // Tengah
+        2: fingerLen := 7.0; // Manis
+        3: fingerLen := 5.5; // Kelingking
+        else fingerLen := 7.0; // Telunjuk
+      end;
+
+      // ANIMASI JARI (Flexion)
+      // Jari menekuk ke arah telapak (Medial / -X).
+      // Karena jari mengarah ke -Y, rotasi ke -X adalah putaran sumbu -Z.
+      // Kita gunakan 'rotangle1' dari timer physics untuk animasi halus.
+      glRotatef(-rotangle1, 0, 0, 1); // Curl Proximal
+
+      // Ruas Proximal
+      glPushMatrix;
+        glRotatef(90, 1, 0, 0); // Cylinder ke bawah
+        gluCylinder(Cylinder, fingerRad, fingerRad*0.9, fingerLen*0.5, 16, 16);
+      glPopMatrix;
+
+      // Pindah ke sendi PIP
+      glTranslatef(0, -fingerLen*0.5, 0);
+      gluSphere(Sphere, fingerRad*0.9, 16, 16);
+
+      // Ruas Distal (Curl lagi)
+      glRotatef(-rotangle1 * 0.8, 0, 0, 1); // Curl Distal
+      glPushMatrix;
+        glRotatef(90, 1, 0, 0);
+        gluCylinder(Cylinder, fingerRad*0.9, fingerRad*0.8, fingerLen*0.5, 16, 16);
+      glPopMatrix;
+
+      // Finger Tip
+      glTranslatef(0, -fingerLen*0.5, 0);
+      gluSphere(Sphere, fingerRad*0.8, 16, 16);
+
+    glPopMatrix;
+  end;
+
+  // --- 8. IBU JARI (THUMB) ---
+  // Jempol posisinya unik: Proximal, Anterior (+Z), dan agak ke dalam.
+  glPushMatrix;
+    // Kembali ke pangkal telapak (dekat wrist)
+    glTranslatef(0, palmLength * 0.6, palmWidth * 0.4);
+
+    // 2. ORIENTASI DASAR (Natural Pose)
+    // Secara default gluCylinder menggambar ke arah sumbu Z+.
+    // Kita putar agar jempol mengarah serong ke "Depan-Bawah-Samping".
+    glRotatef(60, 0, 0, 0);   // Pitch: Arahkan ke bawah-depan
+    glRotatef(-30, 0, 1, 0);  // Yaw: Buka sedikit ke samping (Abduction)
+    glRotatef(20, 0, 0, 1);   // Roll: Putar agar permukaan jempol menghadap jari lain
+
+    // 3. ANIMASI IBU JARI (Flexion)
+    // Gunakan rotangle1 agar bergerak bareng jari lain
+    glRotatef(rotangle1 * 0.6, 1, 0, 0); // Menekuk di pangkal (CMC/MCP joint)
+
+    // --- RUAS PROXIMAL (Pangkal Jempol) ---
+    // Gambar silinder sepanjang sumbu Z lokal
+    gluCylinder(Cylinder, 0.7, 0.6, 2.8, 16, 16);
+
+    // Pindah ke ujung ruas proximal
+    glTranslatef(0, 0, 2.8);
+
+    // Gambar Sendi (Knuckle)
+    gluSphere(Sphere, 0.6, 16, 16);
+
+    // --- RUAS DISTAL (Ujung Jempol) ---
+    // Animasi tekukan ujung (IP Joint)
+    glRotatef(rotangle1 * 0.8, 1, 0, 0);
+
+    // Gambar silinder ujung
+    gluCylinder(Cylinder, 0.6, 0.5, 2.2, 16, 16);
+
+    // Tutup Ujung Jempol (Fingertip)
+    glTranslatef(0, 0, 2.2);
+    gluSphere(Sphere, 0.5, 16, 16);
+
+  glPopMatrix;
+end;
+
+procedure TFormWristJoint.RenderScene;
+begin
+  if (RC = 0) or (DC = 0) then Exit;
+
+  wglMakeCurrent(DC, RC);
+  glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT);
+  glLoadIdentity;
+
+  // 1. Transformasi Kamera (Orbit)
+  // Geser kamera mundur (zpos) dan atur posisi
+  glTranslatef(camX, camY, camZ); // Zoom/Pan
+  glRotatef(camPitch, 1, 0, 0);   // Rotasi Vertikal
+  glRotatef(camYaw, 0, 1, 0);     // Rotasi Horizontal
+  glRotatef(camRoll, 0, 0, 1);    // Miring
+
+  // 2. Gambar Axis TEPAT di titik Pivot (Bahu)
+  // Karena kita belum men-translate model, titik 0,0,0 saat ini adalah pusat bahu.
+  DrawAxis(20.0); // Panjang axis 20 unit
+
+  // 3. Posisikan Lengan
+  // Lengan digambar mulai dari bahu (0,0,0) di DrawArmAndHand
+  // Kita bisa sedikit menaikkan posisi render agar bahu terlihat di bagian atas layar
+  glPushMatrix;
+     glTranslatef(0, 0, 0); // Opsional: Naikkan sedikit agar pas di tengah layar
+     DrawArmAndHand;
+  glPopMatrix;
+
+  SwapBuffers(DC);
+end;
+
+procedure TFormWristJoint.TimerRenderTimer(Sender: TObject);
+begin
+  RenderScene;
+end;
+
+procedure TFormWristJoint.FormResize(Sender: TObject);
+begin
+  if (RC = 0) then Exit;
+  wglMakeCurrent(DC, RC);
+  glViewport(0, 0, PanelGL.Width, PanelGL.Height);
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity;
+  gluPerspective(45, PanelGL.Width / Max(1, PanelGL.Height), 1.0, 500.0);
+  glMatrixMode(GL_MODELVIEW);
+  glLoadIdentity;
+end;
+
+procedure TFormWristJoint.FormShow(Sender: TObject);
+begin
+  InitOpenGL;
+  FormResize(Self);
+end;
+
+procedure TFormWristJoint.FormDestroy(Sender: TObject);
+begin
+  CleanupOpenGL;
+end;
+
+// Camera Events
+procedure TFormWristJoint.seYawChange(Sender: TObject); begin camYaw := seYaw.Value; RenderScene; end;
+procedure TFormWristJoint.sePitchChange(Sender: TObject); begin camPitch := sePitch.Value; RenderScene; end;
+procedure TFormWristJoint.seRollChange(Sender: TObject); begin camRoll := seRoll.Value; RenderScene; end;
+
+procedure TFormWristJoint.BtnResetCameraClick(Sender: TObject);
+begin
+  sePitch.Value := 10;
+  seYaw.Value := 45;
+  seRoll.Value := 0;
+end;
+
+end.
