@@ -1,0 +1,1037 @@
+unit TriplePendulumArm;
+
+interface
+
+uses
+  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
+  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, VclTee.TeeGDIPlus, Vcl.StdCtrls,
+  Vcl.Samples.Spin, Vcl.Buttons, VCLTee.TeEngine, VCLTee.Series, Vcl.ExtCtrls,
+  VCLTee.TeeProcs, VCLTee.Chart, opengl, Math, Vcl.Grids, MotionEquationTriplePendulum;
+
+type
+  // Struktur Data untuk Parameter Sendi
+  TJointParams = record
+    c, k1, k2, k3, k4, phi1, phi2: Double;
+
+    // Parameter Aktif (Target Trajectory)
+    TargetAmp: Double;    // Amplitudo gerakan target (Rad)
+    TargetFreq: Double;   // Frekuensi (Hz)
+    TargetPhase: Double;  // Fasa (untuk delay antar sendi)
+    TargetOffset: Double; // Titik tengah gerakan (Rad)
+
+    // Parameter Kontroler PD (Kekuatan Otot mengejar target)
+    Kp: Double; // Stiffness (Kekakuan mengejar posisi)
+    Kd: Double; // Damping (Peredam kecepatan)
+  end;
+
+  // Struktur Data untuk Segmen Tubuh
+  TSegmentData = record
+    m, l, a, I_inert: Double; // Massa, Panjang, Jarak COM, Inersia
+  end;
+
+  TForm1 = class(TForm)
+    Timer1: TTimer;
+    ScrollBox1: TScrollBox;
+    ChartElbow: TChart;
+    SeriesElbow: TLineSeries;
+    ChartShoulder: TChart;
+    SeriesShoulder: TLineSeries;
+    ChartWrist: TChart;
+    SeriesWrist: TLineSeries;
+    LabelAxisX: TLabel;
+    LabelAxisY: TLabel;
+    LabelAxisZ: TLabel;
+    LabelPitch: TLabel;
+    LabelRoll: TLabel;
+    LabelYaw: TLabel;
+    PanelControl: TPanel;
+    BitBtnRun: TBitBtn;
+    BitBtnStop: TBitBtn;
+    BitBtnClose: TBitBtn;
+    GroupBoxAntro: TGroupBox;
+    LabelBW: TLabel;
+    LabelBH: TLabel;
+    edBW: TEdit;
+    edBH: TEdit;
+    GroupBoxShoulder: TGroupBox;
+    LabelS_c: TLabel;
+    LabelS_k1: TLabel;
+    LabelS_k2: TLabel;
+    LabelS_p1: TLabel;
+    LabelS_k3: TLabel;
+    LabelS_k4: TLabel;
+    LabelS_p2: TLabel;
+    edS_c: TEdit;
+    edS_k1: TEdit;
+    edS_k2: TEdit;
+    edS_p1: TEdit;
+    edS_k3: TEdit;
+    edS_k4: TEdit;
+    edS_p2: TEdit;
+    GroupBoxElbow: TGroupBox;
+    LabelE_c: TLabel;
+    LabelE_k1: TLabel;
+    LabelE_k2: TLabel;
+    LabelE_p1: TLabel;
+    LabelE_k3: TLabel;
+    LabelE_k4: TLabel;
+    LabelE_p2: TLabel;
+    edE_c: TEdit;
+    edE_k1: TEdit;
+    edE_k2: TEdit;
+    edE_p1: TEdit;
+    edE_k3: TEdit;
+    edE_k4: TEdit;
+    edE_p2: TEdit;
+    GroupBoxWrist: TGroupBox;
+    LabelW_c: TLabel;
+    LabelW_k1: TLabel;
+    LabelW_k2: TLabel;
+    LabelW_p1: TLabel;
+    LabelW_k3: TLabel;
+    LabelW_k4: TLabel;
+    LabelW_p2: TLabel;
+    edW_c: TEdit;
+    edW_k1: TEdit;
+    edW_k2: TEdit;
+    edW_p1: TEdit;
+    edW_k3: TEdit;
+    edW_k4: TEdit;
+    edW_p2: TEdit;
+    GroupBoxInit: TGroupBox;
+    LabelInit1: TLabel;
+    LabelInit2: TLabel;
+    LabelInit3: TLabel;
+    edInitSh: TEdit;
+    edInitEl: TEdit;
+    edInitWr: TEdit;
+    GroupBoxMatrix: TGroupBox;
+    GridMatrix: TStringGrid;
+    ButtonMotionEquationFig: TButton;
+    PanelGL: TPanel;
+    sePitch: TSpinEdit;
+    seRoll: TSpinEdit;
+    seYaw: TSpinEdit;
+    BitBtnPassive: TBitBtn;
+
+    procedure FormCreate(Sender: TObject);
+    procedure FormDestroy(Sender: TObject);
+    procedure FormResize(Sender: TObject);
+    procedure PanelGLResize(Sender: TObject);
+
+    procedure BitBtnRunClick(Sender: TObject);
+    procedure BitBtnStopClick(Sender: TObject);
+    procedure BitBtnCloseClick(Sender: TObject);
+
+    procedure Timer1Timer(Sender: TObject);
+
+    procedure seYawChange(Sender: TObject);
+    procedure sePitchChange(Sender: TObject);
+    procedure seRollChange(Sender: TObject);
+    procedure ButtonMotionEquationFigClick(Sender: TObject);
+    procedure BitBtnPassiveClick(Sender: TObject);
+
+  private
+    myDC : HDC;
+    myRC : HGLRC;
+
+    // State Variables (1=Shoulder, 2=Elbow, 3=Wrist)
+    th1, th2, th3 : Double;
+    dth1, dth2, dth3 : Double;
+    ddth1, ddth2, ddth3 : Double;
+
+    // Anthropometry Data
+    SegArm, SegForearm, SegHand : TSegmentData;
+
+    // Joint Parameters
+    ParamSh, ParamEl, ParamWr : TJointParams;
+
+    // Simulation Time
+    SimTime, dt : Double;
+
+    // Camera Vars
+    xpos, ypos, zpos, yaw, pitch, roll : Double;
+    Sphere, Cylinder : GLUquadricObj;
+
+    // Mode flags
+    FPassiveMode: Boolean;
+    FStillCount: Integer;
+
+    // --- Physics Procedures ---
+    procedure CalculateAnthropometry;
+    function ComputePassiveTorque(theta, dtheta: Double; p: TJointParams): Double;
+    function ComputeActiveTorque(SimTime, th, dth: Double; p: TJointParams): Double;
+    procedure ComputeMotionEquation;
+    procedure SolveCramer(
+      M11, M12, M13,
+      M21, M22, M23,
+      M31, M32, M33,
+      R1, R2, R3 : Double;
+      out res1, res2, res3 : Double);
+
+    // --- Helper ---
+    function ReadVal(E: TEdit; Def: Double): Double;
+    procedure SetupPixelFormat;
+    procedure RenderScene;
+    procedure DrawBox(w, h, d: GLfloat);
+    procedure DrawAxis(Length: Single);
+    procedure UpdateCharts;
+    procedure UpdateMatrixGrid(M: array of Double);
+
+    function SafeExp(x: Double): Double;
+    function ClampD(x, lo, hi: Double): Double;
+    function BadNumber(x: Double): Boolean;
+    procedure StopIfSettled;
+
+  public
+    { Public declarations }
+  end;
+
+var
+  Form1: TForm1;
+
+  // OpenGL Lighting
+  mat_specular : array [0..3] of GLfloat = ( 0.2, 0.2, 0.2, 1.0 );
+  mat_shininess : GLfloat = 10.0;
+  light_position : array [0..3] of GLfloat = ( 50.0, 50.0, 50.0, 1.0 );
+
+implementation
+
+{$R *.dfm}
+
+function TForm1.ClampD(x, lo, hi: Double): Double;
+begin
+  if x < lo then Result := lo
+  else if x > hi then Result := hi
+  else Result := x;
+end;
+
+function TForm1.SafeExp(x: Double): Double;
+begin
+  // Exp(709) overflow di double, jadi batasi argumennya
+  x := ClampD(x, -60.0, 60.0);
+  Result := Exp(x);
+end;
+
+function TForm1.BadNumber(x: Double): Boolean;
+begin
+  Result := IsNan(x) or IsInfinite(x);
+end;
+
+// ============================================================================
+// HELPER
+// ============================================================================
+function TForm1.ReadVal(E: TEdit; Def: Double): Double;
+begin
+  try
+    Result := StrToFloat(StringReplace(E.Text, ',', '.', [rfReplaceAll]));
+  except
+    Result := Def;
+  end;
+end;
+
+// ============================================================================
+// ANTHROPOMETRY
+// ============================================================================
+procedure TForm1.CalculateAnthropometry;
+var
+  BW, BH: Double;
+  r1, r2, r3: Double;
+begin
+  BW := ReadVal(edBW, 70.0);
+  BH := ReadVal(edBH, 1.72); // Meter
+
+  // Upper Arm
+  SegArm.m := 0.028 * BW;
+  SegArm.l := 0.172 * BH;
+  SegArm.a := 0.436 * SegArm.l;
+  r1 := 0.322 * SegArm.l;
+  SegArm.I_inert := SegArm.m * Sqr(r1);
+
+  // Forearm
+  SegForearm.m := 0.016 * BW;
+  SegForearm.l := 0.157 * BH;
+  SegForearm.a := 0.430 * SegForearm.l;
+  r2 := 0.303 * SegForearm.l;
+  SegForearm.I_inert := SegForearm.m * Sqr(r2);
+
+  // Hand
+  SegHand.m := 0.006 * BW;
+  SegHand.l := 0.0575 * BH;
+  SegHand.a := 0.494 * SegHand.l;
+  r3 := 0.297 * SegHand.l;
+  SegHand.I_inert := SegHand.m * Sqr(r3);
+end;
+
+// ============================================================================
+// TORQUE MODELS
+// ============================================================================
+
+// Passive torque: viscous damping + soft joint-limits
+// FIXES:
+// - PasTorque harus dihitung dulu (dulu uninitialized)
+// - Term upper-limit harus bertanda NEGATIF agar restoring (bukan runaway)
+function TForm1.ComputePassiveTorque(theta, dtheta: Double; p: TJointParams): Double;
+var
+  thDeg: Double;
+  PasTorque: Double;
+  extTerm, flexTerm: Double;
+begin
+  thDeg := RadToDeg(theta);
+
+  // Soft-limit di bawah (theta < phi1) -> dorong balik ke atas (+)
+  extTerm := p.k1 * SafeExp(-p.k2 * (thDeg - p.phi1));
+
+  // Soft-limit di atas (theta > phi2) -> dorong balik ke bawah (-)
+  flexTerm := -p.k3 * SafeExp( p.k4 * (thDeg - p.phi2));
+
+  PasTorque := (-p.c * dtheta) + extTerm + flexTerm;
+
+  // Clamp torsi pasif agar integrasi stabil (hindari NaN)
+  PasTorque := ClampD(PasTorque, -300.0, 300.0);
+
+  if BadNumber(PasTorque) then PasTorque := 0.0;
+  Result := PasTorque;
+end;
+
+function TForm1.ComputeActiveTorque(SimTime, th, dth: Double; p: TJointParams): Double;
+var
+  TargetPos, TargetVel: Double;
+  ErrorPos, ErrorVel: Double;
+  Omega: Double;
+  CalculatedTorque: Double;
+begin
+  Omega := 2 * Pi * p.TargetFreq;
+
+  TargetPos := p.TargetOffset + p.TargetAmp * Sin(Omega * SimTime + p.TargetPhase);
+  TargetVel := p.TargetAmp * Omega * Cos(Omega * SimTime + p.TargetPhase);
+
+  ErrorPos := TargetPos - th;
+  ErrorVel := TargetVel - dth;
+
+  CalculatedTorque := (p.Kp * ErrorPos) + (p.Kd * ErrorVel);
+
+  CalculatedTorque := ClampD(CalculatedTorque, -50.0, 50.0);
+  if BadNumber(CalculatedTorque) then CalculatedTorque := 0.0;
+
+  Result := CalculatedTorque;
+end;
+
+// ============================================================================
+// SOLVER 3x3
+// ============================================================================
+procedure TForm1.SolveCramer(
+  M11, M12, M13,
+  M21, M22, M23,
+  M31, M32, M33,
+  R1, R2, R3 : Double;
+  out res1, res2, res3 : Double);
+var
+  DetM, Det1, Det2, Det3: Double;
+  eps: Double;
+begin
+  DetM := M11*(M22*M33 - M23*M32) -
+          M12*(M21*M33 - M23*M31) +
+          M13*(M21*M32 - M22*M31);
+
+  eps := 1e-9;
+  if Abs(DetM) < eps then
+  begin
+    if DetM >= 0 then DetM := eps else DetM := -eps; // preserve sign
+  end;
+
+  Det1 := R1 *(M22*M33 - M23*M32) -
+          M12*(R2 *M33 - M23*R3 ) +
+          M13*(R2 *M32 - M22*R3 );
+
+  Det2 := M11*(R2 *M33 - M23*R3 ) -
+          R1 *(M21*M33 - M23*M31) +
+          M13*(M21*R3  - R2 *M31);
+
+  Det3 := M11*(M22*R3  - R2 *M32) -
+          M12*(M21*R3  - R2 *M31) +
+          R1 *(M21*M32 - M22*M31);
+
+  res1 := Det1 / DetM;
+  res2 := Det2 / DetM;
+  res3 := Det3 / DetM;
+
+  if BadNumber(res1) then res1 := 0.0;
+  if BadNumber(res2) then res2 := 0.0;
+  if BadNumber(res3) then res3 := 0.0;
+end;
+
+// ============================================================================
+// MOTION EQUATION
+// ============================================================================
+procedure TForm1.ComputeMotionEquation;
+var
+  K11, K22, K33, K12, K13, K23: Double;
+  G_coeff1, G_coeff2, G_coeff3: Double;
+  g_grav: Double;
+
+  M11, M12, M13, M21, M22, M23, M31, M32, M33: Double;
+  V1, V2, V3: Double;
+  G1, G2, G3: Double;
+
+  Tau1, Tau2, Tau3: Double;
+  TauPassive1, TauPassive2, TauPassive3: Double;
+  TauActive1, TauActive2, TauActive3: Double;
+
+  c12, c13, c23: Double;
+  s12, s13, s23: Double;
+  s1, s2, s3: Double;
+
+  RHS1, RHS2, RHS3: Double;
+begin
+  g_grav := 9.81;
+
+  c12 := Cos(th1 - th2);
+  c13 := Cos(th1 - th3);
+  c23 := Cos(th2 - th3);
+
+  s12 := Sin(th1 - th2);
+  s13 := Sin(th1 - th3);
+  s23 := Sin(th2 - th3);
+
+  s1 := Sin(th1);
+  s2 := Sin(th2);
+  s3 := Sin(th3);
+
+  K11 := SegArm.I_inert + SegArm.m*Sqr(SegArm.a) + (SegForearm.m + SegHand.m)*Sqr(SegArm.l);
+  K22 := SegForearm.I_inert + SegForearm.m*Sqr(SegForearm.a) + SegHand.m*Sqr(SegForearm.l);
+  K33 := SegHand.I_inert + SegHand.m*Sqr(SegHand.a);
+
+  K12 := SegArm.l * (SegForearm.m*SegForearm.a + SegHand.m*SegForearm.l);
+  K13 := SegHand.m * SegArm.l * SegHand.a;
+  K23 := SegHand.m * SegForearm.l * SegHand.a;
+
+  G_coeff1 := g_grav * (SegArm.m*SegArm.a + SegForearm.m*SegArm.l + SegHand.m*SegArm.l);
+  G_coeff2 := g_grav * (SegForearm.m*SegForearm.a + SegHand.m*SegForearm.l);
+  G_coeff3 := g_grav * (SegHand.m*SegHand.a);
+
+  M11 := K11;
+  M12 := K12 * c12;  M21 := M12;
+  M13 := K13 * c13;  M31 := M13;
+  M22 := K22;
+  M23 := K23 * c23;  M32 := M23;
+  M33 := K33;
+
+  UpdateMatrixGrid([M11, M12, M13, M21, M22, M23, M31, M32, M33]);
+
+  V1 := K12*s12*Sqr(dth2) + K13*s13*Sqr(dth3);
+  V2 := -K12*s12*Sqr(dth1) + K23*s23*Sqr(dth3);
+  V3 := -K13*s13*Sqr(dth1) - K23*s23*Sqr(dth2);
+
+  G1 := G_coeff1 * s1;
+  G2 := G_coeff2 * s2;
+  G3 := G_coeff3 * s3;
+
+  TauPassive1 := ComputePassiveTorque(th1, dth1, ParamSh);
+  TauPassive2 := ComputePassiveTorque(th2, dth2, ParamEl);
+  TauPassive3 := ComputePassiveTorque(th3, dth3, ParamWr);
+
+  TauActive1 := ComputeActiveTorque(SimTime, th1, dth1, ParamSh);
+  TauActive2 := ComputeActiveTorque(SimTime, th2, dth2, ParamEl);
+  TauActive3 := ComputeActiveTorque(SimTime, th3, dth3, ParamWr);
+
+  Tau1 := TauPassive1 + TauActive1;
+  Tau2 := TauPassive2 + TauActive2;
+  Tau3 := TauPassive3 + TauActive3;
+
+  RHS1 := Tau1 - V1 - G1;
+  RHS2 := Tau2 - V2 - G2;
+  RHS3 := Tau3 - V3 - G3;
+
+  SolveCramer(
+    M11, M12, M13,
+    M21, M22, M23,
+    M31, M32, M33,
+    RHS1, RHS2, RHS3,
+    ddth1, ddth2, ddth3
+  );
+
+  // Clamp percepatan untuk stabilitas numerik
+  ddth1 := ClampD(ddth1, -800.0, 800.0);
+  ddth2 := ClampD(ddth2, -800.0, 800.0);
+  ddth3 := ClampD(ddth3, -800.0, 800.0);
+end;
+
+// Passive: stop otomatis saat sudah nyaris diam
+procedure TForm1.StopIfSettled;
+const
+  VelEps = 0.002;  // rad/s
+  AccEps = 0.02;   // rad/s^2
+  NeedCount = 300; // ~0.6s jika dt=0.002
+begin
+  if (Abs(dth1) < VelEps) and (Abs(dth2) < VelEps) and (Abs(dth3) < VelEps) and
+     (Abs(ddth1) < AccEps) and (Abs(ddth2) < AccEps) and (Abs(ddth3) < AccEps) then
+    Inc(FStillCount)
+  else
+    FStillCount := 0;
+
+  if FStillCount >= NeedCount then
+  begin
+    dth1 := 0; dth2 := 0; dth3 := 0;
+    ddth1 := 0; ddth2 := 0; ddth3 := 0;
+    Timer1.Enabled := False;
+  end;
+end;
+
+procedure TForm1.Timer1Timer(Sender: TObject);
+begin
+  ComputeMotionEquation;
+
+  // Jika ada NaN/Inf, stop agar tidak “meledak”
+  if BadNumber(ddth1) or BadNumber(ddth2) or BadNumber(ddth3) or
+     BadNumber(dth1)  or BadNumber(dth2)  or BadNumber(dth3)  or
+     BadNumber(th1)   or BadNumber(th2)   or BadNumber(th3) then
+  begin
+    Timer1.Enabled := False;
+    Exit;
+  end;
+
+  // Semi-implicit Euler
+  dth1 := dth1 + ddth1 * dt;
+  dth2 := dth2 + ddth2 * dt;
+  dth3 := dth3 + ddth3 * dt;
+
+  th1 := th1 + dth1 * dt;
+  th2 := th2 + dth2 * dt;
+  th3 := th3 + dth3 * dt;
+
+  SimTime := SimTime + dt;
+
+  UpdateCharts;
+  RenderScene;
+
+  if FPassiveMode then
+    StopIfSettled;
+end;
+
+// ============================================================================
+// GUI ACTIONS
+// ============================================================================
+
+procedure TForm1.BitBtnPassiveClick(Sender: TObject);
+var
+  sh0, el0, wr0: Double;
+begin
+  Timer1.Enabled := False;
+  FPassiveMode := True;
+  FStillCount := 0;
+
+  CalculateAnthropometry;
+
+  // === Passive parameters (lebih realistis, tidak "runaway") ===
+  // Damping cukup untuk menghabiskan energi perlahan
+  ParamSh.c := 0.2;
+  ParamEl.c := 0.3;
+  ParamWr.c := 0.1;
+
+  // Shoulder soft limits
+  ParamSh.phi1 := -20.0;  // ext
+  ParamSh.phi2 := 150.0;  // flex
+  ParamSh.k1 := 2.5;
+  ParamSh.k2 := 0.25;
+  ParamSh.k3 := 2.0;
+  ParamSh.k4 := 0.20;
+
+  // Elbow soft limits (hindari hyperextension)
+  ParamEl.phi1 := -5.0;
+  ParamEl.phi2 := 150.0;
+  ParamEl.k1 := 3.0;
+  ParamEl.k2 := 0.35;
+  ParamEl.k3 := 7.0;
+  ParamEl.k4 := 0.45;
+
+  // Wrist soft limits
+  ParamWr.phi1 := 0;
+  ParamWr.phi2 := 80.0;
+  ParamWr.k1 := 1.8;
+  ParamWr.k2 := 0.30;
+  ParamWr.k3 := 1.8;
+  ParamWr.k4 := 0.30;
+
+  // Matikan active torque
+  ParamSh.TargetFreq := 0; ParamSh.TargetAmp := 0; ParamSh.TargetOffset := 0; ParamSh.TargetPhase := 0;
+  ParamEl.TargetFreq := 0; ParamEl.TargetAmp := 0; ParamEl.TargetOffset := 0; ParamEl.TargetPhase := 0;
+  ParamWr.TargetFreq := 0; ParamWr.TargetAmp := 0; ParamWr.TargetOffset := 0; ParamWr.TargetPhase := 0;
+  ParamSh.Kp := 0; ParamSh.Kd := 0;
+  ParamEl.Kp := 0; ParamEl.Kd := 0;
+  ParamWr.Kp := 0; ParamWr.Kd := 0;
+
+  // (Opsional) tampilkan parameter pasif ke edit box supaya user lihat nilainya (tidak ubah GUI)
+  edS_c.Text  := FloatToStr(ParamSh.c);
+  edS_k1.Text := FloatToStr(ParamSh.k1);
+  edS_k2.Text := FloatToStr(ParamSh.k2);
+  edS_p1.Text := FloatToStr(ParamSh.phi1);
+  edS_k3.Text := FloatToStr(ParamSh.k3);
+  edS_k4.Text := FloatToStr(ParamSh.k4);
+  edS_p2.Text := FloatToStr(ParamSh.phi2);
+
+  edE_c.Text  := FloatToStr(ParamEl.c);
+  edE_k1.Text := FloatToStr(ParamEl.k1);
+  edE_k2.Text := FloatToStr(ParamEl.k2);
+  edE_p1.Text := FloatToStr(ParamEl.phi1);
+  edE_k3.Text := FloatToStr(ParamEl.k3);
+  edE_k4.Text := FloatToStr(ParamEl.k4);
+  edE_p2.Text := FloatToStr(ParamEl.phi2);
+
+  edW_c.Text  := FloatToStr(ParamWr.c);
+  edW_k1.Text := FloatToStr(ParamWr.k1);
+  edW_k2.Text := FloatToStr(ParamWr.k2);
+  edW_p1.Text := FloatToStr(ParamWr.phi1);
+  edW_k3.Text := FloatToStr(ParamWr.k3);
+  edW_k4.Text := FloatToStr(ParamWr.k4);
+  edW_p2.Text := FloatToStr(ParamWr.phi2);
+
+  // Initial angles (derajat). Kalau user masih 0 semua, beri default yang "jatuh" terlihat
+  sh0 := ReadVal(edInitSh, 0);
+  el0 := ReadVal(edInitEl, 0);
+  wr0 := ReadVal(edInitWr, 0);
+
+  if (Abs(sh0) < 1e-6) and (Abs(el0) < 1e-6) and (Abs(wr0) < 1e-6) then
+  begin
+    sh0 := 35;  // bahu agak terangkat
+    el0 := 20;  // siku sedikit menekuk
+    wr0 := 10;  // wrist sedikit fleksi
+    edInitSh.Text := FloatToStr(sh0);
+    edInitEl.Text := FloatToStr(el0);
+    edInitWr.Text := FloatToStr(wr0);
+  end;
+
+  th1 := DegToRad(sh0);
+  th2 := DegToRad(el0);
+  th3 := DegToRad(wr0);
+
+  dth1 := 0; dth2 := 0; dth3 := 0;
+  ddth1 := 0; ddth2 := 0; ddth3 := 0;
+
+  SimTime := 0;
+
+  // Step & timer (stabil)
+  Timer1.Interval := 2;
+  dt := 0.002;
+
+  SeriesShoulder.Clear;
+  SeriesElbow.Clear;
+  SeriesWrist.Clear;
+
+  Timer1.Enabled := True;
+end;
+
+procedure TForm1.BitBtnRunClick(Sender: TObject);
+begin
+  Timer1.Enabled := False;
+  FPassiveMode := False;
+  FStillCount := 0;
+
+  CalculateAnthropometry;
+
+  // --- SHOULDER
+  ParamSh.c := 0.5;
+  ParamSh.k1 := 0.1;
+  ParamSh.k2 := 0.5;
+  ParamSh.k3 := 0.1;
+  ParamSh.k4 := 0.5;
+  ParamSh.phi1 := -45;
+  ParamSh.phi2 := 120;
+
+  ParamSh.TargetFreq   := 1.0;
+  ParamSh.TargetOffset := DegToRad(10);
+  ParamSh.TargetAmp    := DegToRad(35);
+  ParamSh.TargetPhase  := 0;
+
+  ParamSh.Kp := 40.0;
+  ParamSh.Kd := 4.0;
+
+  // --- ELBOW ---
+  ParamEl.c := 0.2;
+  ParamEl.k1 := 0.1;
+  ParamEl.k2 := 0.5;
+  ParamEl.k3 := 0.1;
+  ParamEl.k4 := 0.5;
+  ParamEl.phi1 := 0;
+  ParamEl.phi2 := 140;
+
+  ParamEl.TargetFreq   := 1.0;
+  ParamEl.TargetOffset := DegToRad(25);
+  ParamEl.TargetAmp    := DegToRad(20);
+  ParamEl.TargetPhase  := DegToRad(-30);
+
+  ParamEl.Kp := 20.0;
+  ParamEl.Kd := 2.0;
+
+  // --- WRIST ---
+  ParamWr.c := 0.05;
+  ParamWr.k1 := 0.01;
+  ParamWr.k2 := 0.5;
+  ParamWr.k3 := 0.01;
+  ParamWr.k4 := 0.5;
+  ParamWr.phi1 := 0;
+  ParamWr.phi2 := 60;
+
+  ParamWr.TargetFreq   := 1.0;
+  ParamWr.TargetOffset := DegToRad(25);
+  ParamWr.TargetAmp    := DegToRad(30);
+  ParamWr.TargetPhase  := DegToRad(-60);
+
+  ParamWr.Kp := 8.0;
+  ParamWr.Kd := 0.5;
+
+  // Initial state
+  th1 := ParamSh.TargetOffset;
+  th2 := ParamEl.TargetOffset;
+  th3 := ParamWr.TargetOffset;
+
+  dth1 := 0; dth2 := 0; dth3 := 0;
+  ddth1 := 0; ddth2 := 0; ddth3 := 0;
+  SimTime := 0;
+
+  Timer1.Interval := 2;
+  dt := 0.002;
+
+  SeriesShoulder.Clear;
+  SeriesElbow.Clear;
+  SeriesWrist.Clear;
+
+  Timer1.Enabled := True;
+end;
+
+procedure TForm1.BitBtnStopClick(Sender: TObject);
+begin
+  Timer1.Enabled := False;
+end;
+
+procedure TForm1.ButtonMotionEquationFigClick(Sender: TObject);
+begin
+  if Assigned(Form2) then
+    Form2.Show;
+end;
+
+procedure TForm1.BitBtnCloseClick(Sender: TObject);
+begin
+  Close;
+end;
+
+procedure TForm1.UpdateCharts;
+begin
+  SeriesShoulder.AddXY(SimTime, RadToDeg(th1));
+  SeriesElbow.AddXY(SimTime, RadToDeg(th2));
+  SeriesWrist.AddXY(SimTime, RadToDeg(th3));
+end;
+
+procedure TForm1.UpdateMatrixGrid(M: array of Double);
+var r, c: Integer;
+begin
+  for r := 0 to 2 do
+    for c := 0 to 2 do
+      GridMatrix.Cells[c+1, r+1] := FormatFloat('0.000', M[r*3 + c]);
+end;
+
+// ============================================================================
+// OPENGL RENDER
+// ============================================================================
+procedure TForm1.RenderScene;
+var
+  vL1, vL2, vL3: Double;
+  angleElbow, angleWrist: Double;
+  radShoulder, radElbow, radWrist: Double;
+  i: Integer;
+  fingerLen, fingerWidth: Double;
+  thumbLen: Double;
+  HandScale: Double;
+  rotangle1, rotangle2, rotangle3: Double;
+begin
+  if (myDC = 0) or (myRC = 0) then Exit;
+  wglMakeCurrent(myDC, myRC);
+  glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT);
+  glLoadIdentity;
+
+  glTranslate(xpos, ypos, zpos);
+  glRotate(pitch, 1, 0, 0);
+  glRotate(yaw, 0, 1, 0);
+  glRotate(roll, 0, 0, 1);
+
+  DrawAxis(4.0);
+
+  vL1 := SegArm.l * 10;
+  vL2 := SegForearm.l * 10;
+  vL3 := SegHand.l * 10;
+
+  radShoulder := 0.75;
+  radElbow := 0.55;
+  radWrist := 0.40;
+
+  rotangle1 := 20.0;
+  rotangle2 := 30.0;
+  rotangle3 := 10.0;
+
+  glColor3f(0.75, 0.75, 0.75);
+
+  glPushMatrix();
+    gluSphere(Sphere, radShoulder * 1.1, 32, 32);
+
+    glRotate(RadToDeg(th1) + 90, 1, 0, 0);
+
+    gluCylinder(Cylinder, radShoulder, radElbow, vL1, 32, 32);
+
+    glTranslate(0, 0, vL1);
+    gluSphere(Sphere, radElbow * 1.0, 32, 32);
+
+    angleElbow := RadToDeg(th2 - th1);
+    if angleElbow < 0 then angleElbow := 0;
+    glRotate(angleElbow, 1, 0, 0);
+
+    gluCylinder(Cylinder, radElbow, radWrist, vL2, 32, 32);
+
+    glTranslate(0, 0, vL2);
+    gluSphere(Sphere, radWrist, 24, 24);
+
+    angleWrist := RadToDeg(th3 - th2);
+    glRotate(angleWrist, 1, 0, 0);
+
+    glPushMatrix();
+      glRotate(-90, 0, 0, 1);
+
+      if vL3 > 0.1 then
+        HandScale := (vL3 * 1.9) / 2.4
+      else
+        HandScale := 1.0;
+
+      glScalef(HandScale, HandScale, HandScale);
+
+      glPushMatrix();
+        glTranslate(0, 0, 1.2);
+        DrawBox(1.2, 0.5, 2.4);
+      glPopMatrix();
+
+      fingerWidth := 0.24;
+      for i := 0 to 3 do
+      begin
+        glPushMatrix();
+          glTranslate((0.33 - (i * fingerWidth)), 0, 2.4);
+
+          if i = 1 then fingerLen := 1.6
+          else if i = 3 then fingerLen := 1.1
+          else fingerLen := 1.4;
+
+          glRotate(rotangle1, 1, 0, 0);
+          gluCylinder(Cylinder, 0.11, 0.10, fingerLen * 0.5, 12, 4);
+          glTranslate(0, 0, fingerLen * 0.5);
+          gluSphere(Sphere, 0.10, 8, 8);
+
+          glRotate(rotangle2 * 0.8, 1, 0, 0);
+          gluCylinder(Cylinder, 0.10, 0.09, fingerLen * 0.3, 12, 4);
+          glTranslate(0, 0, fingerLen * 0.3);
+          gluSphere(Sphere, 0.09, 8, 8);
+
+          glRotate(rotangle3 * 0.5, 1, 0, 0);
+          gluCylinder(Cylinder, 0.09, 0.08, fingerLen * 0.2, 12, 4);
+          glTranslate(0, 0, fingerLen * 0.2);
+          gluSphere(Sphere, 0.08, 8, 8);
+        glPopMatrix();
+      end;
+
+      glPushMatrix();
+        glTranslate(0.7, 0, 0.8);
+        glRotate(50, 0, 1, 0);
+        glRotate(20, 0, 0, 1);
+        glRotate(rotangle1 * 0.5, 1, 0, 0);
+
+        thumbLen := 1.2;
+
+        gluCylinder(Cylinder, 0.14, 0.12, thumbLen * 0.4, 12, 4);
+        glTranslate(0, 0, thumbLen * 0.4);
+        gluSphere(Sphere, 0.12, 8, 8);
+
+        glRotate(rotangle2 * 0.5, 1, 0, 0);
+        gluCylinder(Cylinder, 0.12, 0.10, thumbLen * 0.35, 12, 4);
+        glTranslate(0, 0, thumbLen * 0.35);
+        gluSphere(Sphere, 0.10, 8, 8);
+
+        glRotate(rotangle3 * 0.5, 1, 0, 0);
+        gluCylinder(Cylinder, 0.10, 0.09, thumbLen * 0.25, 12, 4);
+        glTranslate(0, 0, thumbLen * 0.25);
+        gluSphere(Sphere, 0.09, 8, 8);
+      glPopMatrix();
+
+    glPopMatrix();
+
+  glPopMatrix();
+
+  SwapBuffers(myDC);
+end;
+
+procedure TForm1.DrawAxis(Length: Single);
+begin
+  glDisable(GL_LIGHTING);
+  glLineWidth(2.0);
+  glBegin(GL_LINES);
+    glColor3f(1.0, 0.0, 0.0);
+    glVertex3f(0, 0, -Length);
+    glVertex3f(0, 0, Length);
+
+    glColor3f(0.0, 1.0, 0.0);
+    glVertex3f(-Length, 0, 0);
+    glVertex3f(Length, 0, 0);
+
+    glColor3f(0.0, 0.0, 1.0);
+    glVertex3f(0, -Length, 0);
+    glVertex3f(0, Length, 0);
+  glEnd;
+  glEnable(GL_LIGHTING);
+end;
+
+procedure TForm1.DrawBox(w, h, d: GLfloat);
+begin
+  glPushMatrix;
+  glScalef(w, h, d);
+  glBegin(GL_QUADS);
+    glNormal3f(0, 0, 1);
+    glVertex3f(-0.5, -0.5, 0.5);
+    glVertex3f(0.5, -0.5, 0.5);
+    glVertex3f(0.5, 0.5, 0.5);
+    glVertex3f(-0.5, 0.5, 0.5);
+
+    glNormal3f(0, 0, -1);
+    glVertex3f(-0.5, -0.5, -0.5);
+    glVertex3f(-0.5, 0.5, -0.5);
+    glVertex3f(0.5, 0.5, -0.5);
+    glVertex3f(0.5, -0.5, -0.5);
+
+    glNormal3f(0, 1, 0);
+    glVertex3f(-0.5, 0.5, -0.5);
+    glVertex3f(-0.5, 0.5, 0.5);
+    glVertex3f(0.5, 0.5, 0.5);
+    glVertex3f(0.5, 0.5, -0.5);
+
+    glNormal3f(0, -1, 0);
+    glVertex3f(-0.5, -0.5, -0.5);
+    glVertex3f(0.5, -0.5, -0.5);
+    glVertex3f(0.5, -0.5, 0.5);
+    glVertex3f(-0.5, -0.5, 0.5);
+
+    glNormal3f(1, 0, 0);
+    glVertex3f(0.5, -0.5, -0.5);
+    glVertex3f(0.5, 0.5, -0.5);
+    glVertex3f(0.5, 0.5, 0.5);
+    glVertex3f(0.5, -0.5, 0.5);
+
+    glNormal3f(-1, 0, 0);
+    glVertex3f(-0.5, -0.5, -0.5);
+    glVertex3f(-0.5, -0.5, 0.5);
+    glVertex3f(-0.5, 0.5, 0.5);
+    glVertex3f(-0.5, 0.5, -0.5);
+  glEnd;
+  glPopMatrix;
+end;
+
+// ============================================================================
+// OPENGL INIT / FORM
+// ============================================================================
+procedure TForm1.FormCreate(Sender: TObject);
+begin
+  yaw := 30;
+  pitch := 0;
+  roll := 0;
+
+  xpos := 0;
+  ypos := 3.5;
+  zpos := -22;
+
+  FPassiveMode := False;
+  FStillCount := 0;
+
+  GridMatrix.Cells[0,0] := 'M';
+  GridMatrix.Cells[1,0] := '1';
+  GridMatrix.Cells[2,0] := '2';
+  GridMatrix.Cells[3,0] := '3';
+  GridMatrix.Cells[0,1] := '1';
+  GridMatrix.Cells[0,2] := '2';
+  GridMatrix.Cells[0,3] := '3';
+
+  myDC := GetDC(PanelGL.Handle);
+  SetupPixelFormat;
+  myRC := wglCreateContext(myDC);
+  wglMakeCurrent(myDC, myRC);
+
+  glEnable(GL_DEPTH_TEST);
+  glEnable(GL_LIGHTING);
+  glEnable(GL_LIGHT0);
+  glEnable(GL_COLOR_MATERIAL);
+
+  glMaterialfv(GL_FRONT, GL_SPECULAR, @mat_specular);
+  glMaterialfv(GL_FRONT, GL_SHININESS, @mat_shininess);
+  glLightfv(GL_LIGHT0, GL_POSITION, @light_position);
+
+  Sphere := gluNewQuadric();
+  Cylinder := gluNewQuadric();
+
+  // Siapkan panjang segmen agar render pertama tidak "nol"
+  CalculateAnthropometry;
+  RenderScene;
+
+  FormResize(nil);
+end;
+
+procedure TForm1.FormDestroy(Sender: TObject);
+begin
+  Timer1.Enabled := False;
+  wglMakeCurrent(0,0);
+  wglDeleteContext(myRC);
+  ReleaseDC(PanelGL.Handle, myDC);
+end;
+
+procedure TForm1.FormResize(Sender: TObject);
+begin
+  if (myDC = 0) then Exit;
+  wglMakeCurrent(myDC, myRC);
+  glViewport(0, 0, PanelGL.Width, PanelGL.Height);
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  gluPerspective(45.0, PanelGL.Width / PanelGL.Height, 1, 200.0);
+  glMatrixMode(GL_MODELVIEW);
+  glLoadIdentity();
+end;
+
+procedure TForm1.PanelGLResize(Sender: TObject);
+begin
+  FormResize(Sender);
+end;
+
+procedure TForm1.SetupPixelFormat;
+var nPixelFormat: Integer; pfd: TPixelFormatDescriptor;
+begin
+  FillChar(pfd, SizeOf(pfd), 0);
+  pfd.nSize := sizeof(pfd);
+  pfd.nVersion := 1;
+  pfd.dwFlags := PFD_DRAW_TO_WINDOW or PFD_SUPPORT_OPENGL or PFD_DOUBLEBUFFER;
+  pfd.iPixelType := PFD_TYPE_RGBA;
+  pfd.cColorBits := 32;
+  pfd.cDepthBits := 32;
+  pfd.iLayerType := PFD_MAIN_PLANE;
+  nPixelFormat := ChoosePixelFormat(myDC, @pfd);
+  SetPixelFormat(myDC, nPixelFormat, @pfd);
+end;
+
+procedure TForm1.seYawChange(Sender: TObject);
+begin
+  yaw := seYaw.Value;
+  RenderScene;
+end;
+
+procedure TForm1.sePitchChange(Sender: TObject);
+begin
+  pitch := sePitch.Value;
+  RenderScene;
+end;
+
+procedure TForm1.seRollChange(Sender: TObject);
+begin
+  roll := seRoll.Value;
+  RenderScene;
+end;
+
+end.

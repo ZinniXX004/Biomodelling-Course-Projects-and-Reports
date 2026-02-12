@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<BorlandProject>
+	<Transactions>
+    <Transaction>2025/08/28 13:18:53.000.290,=C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\Unit1.pas</Transaction>
+    <Transaction>2025/12/18 03:39:52.000.470,=C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\Unit1.pas</Transaction>
+    <Transaction>2025/12/18 03:41:01.000.313,=C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\Unit2.pas</Transaction>
+    <Transaction>2025/12/18 03:41:22.000.109,C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\Unit2.dfm=C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\MotionEquationTriplePendulum.dfm</Transaction>
+    <Transaction>2025/12/18 03:41:22.000.109,C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\Unit2.pas=C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\MotionEquationTriplePendulum.pas</Transaction>
+    <Transaction>2025/12/18 03:41:40.000.969,C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\Unit1.pas=C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\TriplePendulumArm.pas</Transaction>
+    <Transaction>2025/12/18 03:41:40.000.969,C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\Unit1.dfm=C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\TriplePendulumArm.dfm</Transaction>
+    <Transaction>2025/12/18 03:42:59.000.079,C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\TriplePendulumArm.pas=D:\Sem 5\Biomodelling (A)\5023231017_Jeremia Christ Immanuel Manalu_Assignment 4_Upper Limb Model Matrix and Knee Extension_Biomodelling (A)\FIX PROGRAM TRIPLE PENDULUM\TriplePendulumArm.pas</Transaction>
+    <Transaction>2025/12/18 03:42:59.000.079,C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\TriplePendulumArm.dfm=D:\Sem 5\Biomodelling (A)\5023231017_Jeremia Christ Immanuel Manalu_Assignment 4_Upper Limb Model Matrix and Knee Extension_Biomodelling (A)\FIX PROGRAM TRIPLE PENDULUM\TriplePendulumArm.dfm</Transaction>
+    <Transaction>2025/12/18 03:43:01.000.550,C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\MotionEquationTriplePendulum.pas=D:\Sem 5\Biomodelling (A)\5023231017_Jeremia Christ Immanuel Manalu_Assignment 4_Upper Limb Model Matrix and Knee Extension_Biomodelling (A)\FIX PROGRAM TRIPLE PENDULUM\MotionEquationTriplePendulum.pas</Transaction>
+    <Transaction>2025/12/18 03:43:01.000.550,C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\MotionEquationTriplePendulum.dfm=D:\Sem 5\Biomodelling (A)\5023231017_Jeremia Christ Immanuel Manalu_Assignment 4_Upper Limb Model Matrix and Knee Extension_Biomodelling (A)\FIX PROGRAM TRIPLE PENDULUM\MotionEquationTriplePendulum.dfm</Transaction>
+    <Transaction>2025/12/18 03:43:17.000.659,C:\Users\USER\OneDrive\Documents\Embarcadero\Studio\Projects\Project1.dproj=D:\Sem 5\Biomodelling (A)\5023231017_Jeremia Christ Immanuel Manalu_Assignment 4_Upper Limb Model Matrix and Knee Extension_Biomodelling (A)\FIX PROGRAM TRIPLE PENDULUM\ProjectTriplePendulumArm.dproj</Transaction>
+  </Transactions>
+</BorlandProject>

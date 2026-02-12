@@ -1,0 +1,324 @@
+unit UnitMuscleModelling;
+
+interface
+
+uses
+  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
+  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, VclTee.TeeGDIPlus, Vcl.StdCtrls,
+  VCLTee.TeEngine, VCLTee.Series, Vcl.ExtCtrls, VCLTee.TeeProcs, VCLTee.Chart, math,
+  Vcl.Buttons, UnitForceGeneration, UnitHillTypeMuscleModel;
+
+type
+  TForm2 = class(TForm)
+    SaveDialog1: TSaveDialog;
+    OpenDialog1: TOpenDialog;
+    OpenDialog2: TOpenDialog;
+    ScrollBox1: TScrollBox;
+    Chart1: TChart;
+    Series1: TLineSeries; // Akan digunakan untuk l < lopt (Ascending)
+    Chart2: TChart;
+    Series2: TLineSeries;
+    Series3: TLineSeries;
+    ListBox1: TListBox;
+    ListBox2: TListBox;
+    GroupBox1: TGroupBox;
+    BitBtn1: TBitBtn;
+    Button1: TButton;
+    Button2: TButton;
+    Button3: TButton;
+    Button4: TButton;
+    Button5: TButton;
+    Edit1: TEdit;
+    Label1: TLabel;
+    Label2: TLabel;
+    Label3: TLabel;
+    // *** TAMBAHKAN DUA KOMPONEN SERIES BARU KE CHART1 DI FORM DESIGNER ***
+    // 1. TLineSeries dengan nama: SeriesFL_Descending
+    // 2. TLineSeries dengan nama: SeriesVerticalLine
+    SeriesFL_Descending: TLineSeries;
+    SeriesVerticalLine: TLineSeries;
+    ButtonForceGeneration: TButton;
+    ButtonHillTypeMuscleModel: TButton;
+    procedure Button1Click(Sender: TObject);
+    procedure Button2Click(Sender: TObject);
+    procedure Button4Click(Sender: TObject);
+    procedure Button3Click(Sender: TObject);
+    procedure Button5Click(Sender: TObject);
+    procedure BitBtn1Click(Sender: TObject);
+    procedure ButtonForceGenerationClick(Sender: TObject);
+    procedure ButtonHillTypeMuscleModelClick(Sender: TObject);
+  private
+    { Private declarations }
+  public
+    { Public declarations }
+  end;
+
+var
+  Form2: TForm2;
+
+implementation
+
+{$R *.dfm}
+
+// *** PROSEDUR YANG DIMODIFIKASI ***
+procedure TForm2.Button1Click(Sender: TObject);
+var
+  n: Integer;
+  ltheta, fl, lopt: Double;
+  fls: string;
+begin
+  lopt := StrToFloat(Edit1.Text);
+
+  // *** ADDED/MODIFIED LINES ***
+  // Mengganti nama Series1 menjadi SeriesFL_Ascending di Object Inspector untuk kejelasan
+  // Pastikan SeriesFL_Descending dan SeriesVerticalLine sudah ditambahkan ke Chart1
+  Series1.Title := 'F-L (Ascending)';
+  SeriesFL_Descending.Title := 'F-L (Descending)';
+  SeriesVerticalLine.Title := 'Optimal Length';
+
+  // Membersihkan series dan listbox sebelum menambahkan data baru
+  Series1.Clear;
+  SeriesFL_Descending.Clear;
+  SeriesVerticalLine.Clear;
+  ListBox1.Clear;
+  // *** END OF ADDED/MODIFIED LINES ***
+
+  ListBox1.Items.Add('Length | Force');
+
+  for n := 0 to 100 do
+  begin
+    ltheta := (0.5 * lopt) + n * ((1.5 * lopt) - (0.5 * lopt)) / 100;
+    fl := 1 - Power((ltheta - lopt) / (0.5 * lopt), 2);
+    Str(fl:3:4, fls);
+    ListBox1.Items.Add(FloatToStrF(ltheta, ffFixed, 8, 4) + ' | ' + fls);
+
+    // *** ADDED/MODIFIED LINES ***
+    // Memisahkan data point ke series yang berbeda berdasarkan lopt
+    // Titik puncak (ltheta = lopt) ditambahkan ke kedua series agar kurva menyambung sempurna
+    if ltheta <= lopt then
+    begin
+      Series1.AddXY(ltheta, fl);
+    end;
+
+    if ltheta >= lopt then
+    begin
+      SeriesFL_Descending.AddXY(ltheta, fl);
+    end;
+    // *** END OF ADDED/MODIFIED LINES ***
+  end;
+
+  // *** ADDED/MODIFIED LINES ***
+  // Menambahkan garis vertikal merah pada posisi lopt
+  SeriesVerticalLine.Pen.Color := clRed; // Mengatur warna garis menjadi merah
+  SeriesVerticalLine.AddXY(lopt, Chart1.Axes.Left.Minimum); // Titik bawah garis
+  SeriesVerticalLine.AddXY(lopt, Chart1.Axes.Left.Maximum); // Titik atas garis (puncak grafik)
+  // *** END OF ADDED/MODIFIED LINES ***
+end;
+
+procedure TForm2.BitBtn1Click(Sender: TObject);
+begin
+  Close;
+end;
+
+procedure TForm2.Button2Click(Sender: TObject);
+var
+  vmax, i: Integer;
+  c, v, f_v: Double;
+begin
+  vmax := 3;
+  c := 2.5;
+  ListBox2.Clear;
+
+  ListBox2.Items.Add('Velocity | Force');
+
+  // Calculation for v from -1 to 0 (Concentric)
+  for i := 0 to 100 do
+  begin
+    v := -1 + i / 100.0;
+    f_v := (vmax - v) / (vmax + c * v);
+    v := (-v - 1);
+    f_v := f_v / 8;
+
+    Series2.AddXY(v, f_v);
+
+    ListBox2.Items.Add(Format('%.3f |%.3f', [v, f_v]));
+  end;
+
+  // Calculation for v from 0 to 0.5 (Eccentric)
+  for i := 0 to 50 do
+  begin
+    v := i / 100.0;
+    f_v := 1.3 - (0.3 * ((vmax - c * vmax) / (1 + c * c * v)));
+    f_v := (-f_v / 3) + 1.8833;
+
+    Series3.AddXY(v, f_v);
+
+    ListBox2.Items.Add(Format('%.3f |%.3f', [v, f_v]));
+  end;
+end;
+
+procedure TForm2.Button3Click(Sender: TObject);
+begin
+  // Clears all data from ListBoxes and Charts
+  ListBox1.Clear;
+  ListBox2.Clear;
+
+  Series1.Clear;
+  Series2.Clear;
+  Series3.Clear;
+
+  // Membersihkan series tambahan di Chart1
+  SeriesFL_Descending.Clear;
+  SeriesVerticalLine.Clear;
+end;
+
+procedure TForm2.Button4Click(Sender: TObject);
+var
+  SaveDialog1: TSaveDialog;
+  ListBoxContent: TStringList;
+begin
+  SaveDialog1 := TSaveDialog.Create(Self);
+  ListBoxContent := TStringList.Create;
+  try
+    SaveDialog1.Filter := 'Text Files (*.txt)|*.txt|All Files (*.*)|*.*';
+    SaveDialog1.DefaultExt := 'txt';
+
+    // Save ListBox1 - Title translated to English
+    SaveDialog1.Title := 'Save ListBox1 Data';
+    if SaveDialog1.Execute then
+    begin
+      ListBoxContent.Assign(ListBox1.Items);
+      ListBoxContent.SaveToFile(SaveDialog1.FileName);
+    end;
+
+    // Save ListBox2 - Title translated to English
+    SaveDialog1.Title := 'Save ListBox2 Data';
+    if SaveDialog1.Execute then
+    begin
+      ListBoxContent.Assign(ListBox2.Items);
+      ListBoxContent.SaveToFile(SaveDialog1.FileName);
+    end;
+  finally
+    SaveDialog1.Free;
+    ListBoxContent.Free;
+  end;
+end;
+
+procedure TForm2.Button5Click(Sender: TObject);
+var
+  FileLines1, FileLines2: TStringList;
+  LineData: TStringList;
+  FileName1, FileName2: string;
+  i: Integer;
+  XValue, YValue: Double;
+begin
+  FileLines1 := TStringList.Create;
+  FileLines2 := TStringList.Create;
+  LineData := TStringList.Create;
+
+  try
+    // Select the first file
+    if OpenDialog1.Execute then
+    begin
+      FileName1 := OpenDialog1.FileName;
+      if FileExists(FileName1) then
+      begin
+        FileLines1.LoadFromFile(FileName1);
+
+        ListBox1.Clear;
+        Chart1.Series[0].Clear;
+
+        // Process the first file
+        for i := 0 to FileLines1.Count - 1 do
+        begin
+          LineData.CommaText := StringReplace(FileLines1[i], '|', ',', [rfReplaceAll]);
+
+          if LineData.Count = 2 then
+          begin
+            XValue := StrToFloatDef(LineData[0], 0);
+            YValue := StrToFloatDef(LineData[1], 0);
+
+            ListBox1.Items.Add(FileLines1[i]);
+            Chart1.Series[0].AddXY(XValue, YValue);
+          end
+          else
+          begin
+            ShowMessage('Invalid data format in ' + FileName1 + ' at line ' + IntToStr(i + 1));
+            Break;
+          end;
+        end;
+      end
+      else
+      begin
+        ShowMessage('File not found: ' + FileName1);
+      end;
+    end;
+
+    // Select the second file
+    if OpenDialog2.Execute then
+    begin
+      FileName2 := OpenDialog2.FileName;
+      if FileExists(FileName2) then
+      begin
+        FileLines2.LoadFromFile(FileName2);
+
+        ListBox2.Clear;
+        if Chart2.SeriesCount < 4 then
+        begin
+          Chart2.AddSeries(TLineSeries);
+          Chart2.AddSeries(TLineSeries);
+        end;
+        Chart2.Series[2].Clear;
+        Chart2.Series[3].Clear;
+
+        // Process the second file
+        for i := 0 to FileLines2.Count - 1 do
+        begin
+          LineData.CommaText := StringReplace(FileLines2[i], '|', ',', [rfReplaceAll]);
+
+          if LineData.Count = 2 then
+          begin
+            XValue := StrToFloatDef(LineData[0], 0);
+            YValue := StrToFloatDef(LineData[1], 0);
+
+            ListBox2.Items.Add(FileLines2[i]);
+            Chart2.Series[2].AddXY(XValue, YValue);
+          end
+          else
+          begin
+            ShowMessage('Invalid data format in ' + FileName2 + ' at line ' + IntToStr(i + 1));
+            Break;
+          end;
+        end;
+      end
+      else
+      begin
+        ShowMessage('File not found: ' + FileName2);
+      end;
+    end;
+
+    ShowMessage('Successfully loaded two files!');
+  except
+    on E: Exception do
+      ShowMessage('Error: ' + E.Message);
+  end;
+
+  // Free memory
+  FileLines1.Free;
+  FileLines2.Free;
+  LineData.Free;
+end;
+
+procedure TForm2.ButtonHillTypeMuscleModelClick(Sender: TObject);
+begin
+  if Assigned(FormHillTypeMuscleModel) then
+    FormHillTypeMuscleModel.Show;
+end;
+
+procedure TForm2.ButtonForceGenerationClick(Sender: TObject);
+begin
+  if Assigned(FormForceGeneration) then
+    FormForceGeneration.Show;
+end;
+
+end.

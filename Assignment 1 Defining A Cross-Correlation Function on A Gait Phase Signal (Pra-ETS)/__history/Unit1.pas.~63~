@@ -1,0 +1,442 @@
+unit Unit1;
+
+interface
+
+uses
+  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
+  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, VclTee.TeeGDIPlus, Vcl.ComCtrls,
+  Vcl.StdCtrls, VCLTee.TeEngine, VCLTee.Series, Vcl.ExtCtrls, VCLTee.TeeProcs,
+  VCLTee.Chart, Vcl.Buttons, System.Math;
+
+type
+  TForm1 = class(TForm)
+    btnInputData: TButton;
+    btnCompute: TButton;
+    bitbtnExit: TBitBtn;
+    OpenDialog1: TOpenDialog;
+    ChartGait: TChart;
+    PageControlResults: TPageControl;
+    TabAutocorr: TTabSheet;
+    TabCrosscorr: TTabSheet;
+    TabNormalization: TTabSheet;
+    ListBoxAutoCorr: TListBox;
+    SeriesHeel: TLineSeries;
+    SeriesToe: TLineSeries;
+    ListBoxCrossCorr: TListBox;
+    ChartCrossCorr: TChart;
+    SeriesCrossCorr: TLineSeries;
+    ListBoxNorm: TListBox;
+    ChartNorm: TChart;
+    SeriesNorm: TLineSeries;
+    TrackBarLag: TTrackBar;
+    EditLag: TEdit;
+    lblLag: TLabel;
+    SeriesToeShifted: TLineSeries;
+    ButtonClear: TButton;
+    TabShiftedAutocorr: TTabSheet;
+    ListBoxShiftedAutoCorr: TListBox;
+    TabShiftedCrossCorr: TTabSheet;
+    ListBoxShiftedCrossCorr: TListBox;
+    TabShiftedNormalization: TTabSheet;
+    ListBoxShiftedNorm: TListBox;
+    ChartShiftedCrossCorr: TChart;
+    ChartShiftedNorm: TChart;
+    SeriesShiftedCrossCorr: TLineSeries;
+    SeriesShiftedNorm: TLineSeries;
+    procedure btnInputDataClick(Sender: TObject);
+    procedure btnComputeClick(Sender: TObject);
+    procedure TrackBarLagChange(Sender: TObject);
+    procedure ButtonClearClick(Sender: TObject);
+    procedure bitbtnExitClick(Sender: TObject);
+    procedure EditLagKeyPress(Sender: TObject; var Key: Char);
+  private
+    { Private declarations }
+    Heel, Toe: TArray<Double>;
+    Sample: Integer;
+    procedure PlotInputData;
+    procedure UpdateShiftedToeChart(const AShift: Integer);
+    procedure CalculateAndUpdateShiftedResults(const AShift: Integer);
+    function ReadDataFile(const AFileName: string; out AData: TArray<Double>): Integer;
+  public
+    { Public declarations }
+  end;
+
+var
+  Form1: TForm1;
+
+implementation
+
+{$R *.dfm}
+
+function TForm1.ReadDataFile(const AFileName: string; out AData: TArray<Double>): Integer;
+var
+  F: TextFile;
+  i: Integer;
+  line: string;
+  tempValue: Double;
+begin
+  Result := 0;
+  if not FileExists(AFileName) then Exit;
+
+  AssignFile(F, AFileName);
+  try
+    Reset(F);
+    i := 0;
+    while not Eof(F) do
+    begin
+      Readln(F);
+      Inc(i);
+    end;
+    SetLength(AData, i);
+
+    Reset(F);
+    i := 0;
+    while not Eof(F) do
+    begin
+      Readln(F, line);
+      if TryStrToFloat(Trim(line), tempValue) then
+      begin
+        AData[i] := tempValue;
+        Inc(i);
+      end;
+    end;
+    Result := i;
+  finally
+    CloseFile(F);
+  end;
+end;
+
+procedure TForm1.btnInputDataClick(Sender: TObject);
+var
+  heelCount, toeCount: Integer;
+begin
+  ButtonClearClick(nil);
+
+  OpenDialog1.Title := 'Please select the HEEL data file (e.g., Heel123.txt)';
+  if OpenDialog1.Execute then
+  begin
+    heelCount := ReadDataFile(OpenDialog1.FileName, Heel);
+  end else
+  begin
+    ShowMessage('Heel data loading cancelled.');
+    Exit;
+  end;
+
+  OpenDialog1.Title := 'Please select the TOE data file (e.g., Toe123.txt)';
+  if OpenDialog1.Execute then
+  begin
+    toeCount := ReadDataFile(OpenDialog1.FileName, Toe);
+  end else
+  begin
+    ShowMessage('Toe data loading cancelled.');
+    Exit;
+  end;
+
+  if (heelCount = 0) or (toeCount = 0) then
+  begin
+    ShowMessage('Error reading data or files are empty. Please check the files.');
+    ButtonClearClick(nil);
+    Exit;
+  end;
+
+  Sample := Min(heelCount, toeCount);
+  SetLength(Heel, Sample);
+  SetLength(Toe, Sample);
+
+  PlotInputData;
+  btnCompute.Enabled := Sample > 0;
+end;
+
+procedure TForm1.ButtonClearClick(Sender: TObject);
+begin
+  SetLength(Heel, 0);
+  SetLength(Toe, 0);
+  Sample := 0;
+
+  SeriesHeel.Clear;
+  SeriesToe.Clear;
+  SeriesToeShifted.Clear;
+  SeriesCrossCorr.Clear;
+  SeriesNorm.Clear;
+  SeriesShiftedCrossCorr.Clear;
+  SeriesShiftedNorm.Clear;
+
+  ListBoxAutoCorr.Clear;
+  ListBoxCrossCorr.Clear;
+  ListBoxNorm.Clear;
+  ListBoxShiftedAutoCorr.Clear;
+  ListBoxShiftedCrossCorr.Clear;
+  ListBoxShiftedNorm.Clear;
+
+  TrackBarLag.Position := 0;
+  TrackBarLag.Min := 0;
+  TrackBarLag.Max := 10;
+  EditLag.Text := '0';
+  TrackBarLag.Enabled := False;
+  EditLag.Enabled := False;
+  btnCompute.Enabled := False;
+end;
+
+procedure TForm1.PlotInputData;
+var
+  i: Integer;
+begin
+  SeriesHeel.Clear;
+  SeriesToe.Clear;
+  SeriesToeShifted.Clear;
+
+  SeriesHeel.Title := 'Heel (x)';
+  SeriesToe.Title := 'Toe (y)';
+  SeriesToeShifted.Title := 'Toe (y shifted)';
+
+  for i := 0 to Sample - 1 do
+  begin
+    SeriesHeel.AddXY(i, Heel[i]);
+    SeriesToe.AddXY(i, Toe[i]);
+  end;
+
+  if Sample > 0 then
+  begin
+    TrackBarLag.Min := -(Sample - 1);
+    TrackBarLag.Max := (Sample - 1);
+  end
+  else
+  begin
+    TrackBarLag.Min := 0;
+    TrackBarLag.Max := 10;
+  end;
+
+  TrackBarLag.Position := 0;
+  EditLag.Text := '0';
+  TrackBarLag.Enabled := True;
+  EditLag.Enabled := True;
+
+  UpdateShiftedToeChart(0);
+end;
+
+procedure TForm1.bitbtnExitClick(Sender: TObject);
+begin
+  Close;
+end;
+
+procedure TForm1.btnComputeClick(Sender: TObject);
+var
+  L, n: Integer;
+  sigmaL: Real;
+  RxxToe: TArray<Double>;
+  Rxy: TArray<Double>;
+  NormRxy: TArray<Double>;
+  maxLag, lagRange, lagOffset: Integer;
+  sx, sy, srxy: string;
+begin
+  if Sample <= 0 then
+  begin
+    ShowMessage('Please input data first.');
+    Exit;
+  end;
+
+  // 1. AUTOCORRELATION of Original Toe Data
+  ListBoxAutoCorr.Clear;
+  SetLength(RxxToe, Sample);
+  for L := 0 to Sample - 1 do
+  begin
+    sigmaL := 0;
+    for n := 0 to Sample - 1 - L do
+      sigmaL := sigmaL + Toe[n] * Toe[n + L];
+    RxxToe[L] := sigmaL;
+    ListBoxAutoCorr.Items.Add(Format('Rxx[%d] = %8.3f', [L, RxxToe[L]]));
+  end;
+
+  // 2. CROSS-CORRELATION - Original Heel vs Toe
+  ListBoxCrossCorr.Clear;
+  SeriesCrossCorr.Clear;
+  maxLag := Sample - 1;
+  lagRange := 2 * maxLag + 1;
+  lagOffset := maxLag;
+  SetLength(Rxy, lagRange);
+
+  for L := -maxLag to maxLag do
+  begin
+    sigmaL := 0;
+    if L >= 0 then
+      for n := 0 to Sample - 1 - L do
+        sigmaL := sigmaL + Heel[n] * Toe[n + L]
+    else
+      for n := 0 to Sample - 1 + L do
+        sigmaL := sigmaL + Heel[n - L] * Toe[n];
+    Rxy[L + lagOffset] := sigmaL;
+    SeriesCrossCorr.AddXY(-L, sigmaL);
+  end;
+
+  for L := 0 to Sample - 1 do
+  begin
+     sx := FloatToStrF(Heel[L], ffFixed, 5, 3);
+     sy := FloatToStrF(Toe[L], ffFixed, 5, 3);
+     srxy := FloatToStrF(Rxy[-L + lagOffset], ffFixed, 8, 3);
+     ListBoxCrossCorr.Items.Add(Format('x[%d]=%s   y[%d]=%s  rxy[%d]=%s', [L, sx, L, sy, L, srxy]));
+  end;
+
+  // 3. NORMALIZATION of CROSS-CORRELATION
+  ListBoxNorm.Clear;
+  SeriesNorm.Clear;
+  SetLength(NormRxy, lagRange);
+
+  ListBoxNorm.Items.Add('Lag' + #9 + 'Normalized Rxy');
+  for L := -maxLag to maxLag do
+  begin
+    // Using the normalization method: Rxy(L) / (N - |L|)
+    // This scales the result based on the number of overlapping samples.
+    if (Sample - Abs(L)) > 0 then
+    begin
+      NormRxy[L + lagOffset] := Rxy[L + lagOffset] / (Sample - Abs(L));
+    end
+    else
+    begin
+      NormRxy[L + lagOffset] := 0;
+    end;
+
+    ListBoxNorm.Items.Add(Format('%d'#9'%8.3f', [L, NormRxy[L + lagOffset]]));
+    SeriesNorm.AddXY(-L, NormRxy[L + lagOffset]);
+  end;
+
+  CalculateAndUpdateShiftedResults(0);
+  PageControlResults.ActivePage := TabAutocorr;
+end;
+
+procedure TForm1.EditLagKeyPress(Sender: TObject; var Key: Char);
+var
+  val: Integer;
+begin
+  if Key = #13 then
+  begin
+    if TryStrToInt(EditLag.Text, val) then
+    begin
+      if val < TrackBarLag.Min then val := TrackBarLag.Min;
+      if val > TrackBarLag.Max then val := TrackBarLag.Max;
+      TrackBarLag.Position := val;
+    end
+    else
+    begin
+      EditLag.Text := IntToStr(TrackBarLag.Position);
+    end;
+    Key := #0;
+  end;
+end;
+
+procedure TForm1.TrackBarLagChange(Sender: TObject);
+var
+  shiftValue: Integer;
+begin
+  shiftValue := TrackBarLag.Position;
+  EditLag.Text := IntToStr(shiftValue);
+  if Sample > 0 then
+  begin
+    UpdateShiftedToeChart(shiftValue);
+    CalculateAndUpdateShiftedResults(shiftValue);
+  end;
+end;
+
+procedure TForm1.UpdateShiftedToeChart(const AShift: Integer);
+var
+  i: Integer;
+begin
+  SeriesToeShifted.Clear;
+  for i := 0 to Sample - 1 do
+  begin
+    if (i - AShift >= 0) and (i - AShift < Sample) then
+    begin
+      SeriesToeShifted.AddXY(i, Toe[i - AShift]);
+    end;
+  end;
+end;
+
+procedure TForm1.CalculateAndUpdateShiftedResults(const AShift: Integer);
+var
+  ShiftedToe: TArray<Double>;
+  i, L, n: Integer;
+  sigmaL: Real;
+  RxxShiftedToe: TArray<Double>;
+  ShiftedRxy: TArray<Double>;
+  maxLag, lagRange, lagOffset: Integer;
+  sx, sy_shifted, srxy_shifted: string;
+  ShiftedNormRxy: TArray<Double>;
+begin
+  if (Sample <= 0) or not Assigned(ListBoxShiftedAutoCorr) then Exit;
+
+  SetLength(ShiftedToe, Sample);
+  for i := 0 to Sample - 1 do
+  begin
+    if (i - AShift >= 0) and (i - AShift < Sample) then
+      ShiftedToe[i] := Toe[i - AShift]
+    else
+      ShiftedToe[i] := 0;
+  end;
+
+  // 1. Calculate SHIFTED AUTOCORRELATION (for ShiftedToe)
+  ListBoxShiftedAutoCorr.Clear;
+  SetLength(RxxShiftedToe, Sample);
+  ListBoxShiftedAutoCorr.Items.Add('ACF for Toe data shifted by ' + IntToStr(AShift));
+  ListBoxShiftedAutoCorr.Items.Add('Lag' + #9 + 'Rxx');
+  for L := 0 to Sample - 1 do
+  begin
+    sigmaL := 0;
+    for n := 0 to Sample - 1 - L do
+      sigmaL := sigmaL + ShiftedToe[n] * ShiftedToe[n + L];
+    RxxShiftedToe[L] := sigmaL;
+    ListBoxShiftedAutoCorr.Items.Add(Format('%d   %8.3f', [L, RxxShiftedToe[L]]));
+  end;
+
+  // 2. Calculate SHIFTED CROSS-CORRELATION (Heel vs ShiftedToe)
+  ListBoxShiftedCrossCorr.Clear;
+  SeriesShiftedCrossCorr.Clear;
+  maxLag := Sample - 1;
+  lagRange := 2 * maxLag + 1;
+  lagOffset := maxLag;
+  SetLength(ShiftedRxy, lagRange);
+
+  for L := -maxLag to maxLag do
+  begin
+    sigmaL := 0;
+    if L >= 0 then
+      for n := 0 to Sample - 1 - L do
+        sigmaL := sigmaL + Heel[n] * ShiftedToe[n + L]
+    else
+      for n := 0 to Sample - 1 + L do
+        sigmaL := sigmaL + Heel[n - L] * ShiftedToe[n];
+    ShiftedRxy[L + lagOffset] := sigmaL;
+    SeriesShiftedCrossCorr.AddXY(-L, sigmaL);
+  end;
+
+  for L := 0 to Sample - 1 do
+  begin
+     sx := FloatToStrF(Heel[L], ffFixed, 5, 3);
+     sy_shifted := FloatToStrF(ShiftedToe[L], ffFixed, 5, 3);
+     srxy_shifted := FloatToStrF(ShiftedRxy[L + lagOffset], ffFixed, 8, 3);
+     ListBoxShiftedCrossCorr.Items.Add(Format('x[%d]=%s  y_sh[%d]=%s  rxy_sh[%d]=%s',
+       [L, sx, L, sy_shifted, L, srxy_shifted]));
+  end;
+
+  // 3. Calculate SHIFTED NORMALIZATION (of Shifted Cross-Corr)
+  ListBoxShiftedNorm.Clear;
+  SeriesShiftedNorm.Clear;
+  SetLength(ShiftedNormRxy, lagRange);
+
+  ListBoxShiftedNorm.Items.Add('Lag' + #9 + 'Normalized Shifted Rxy');
+  for L := -maxLag to maxLag do
+  begin
+    // Using the normalization method: Rxy(L) / (N - |L|)
+    if (Sample - Abs(L)) > 0 then
+    begin
+      ShiftedNormRxy[L + lagOffset] := ShiftedRxy[L + lagOffset] / (Sample - Abs(L));
+    end
+    else
+    begin
+      ShiftedNormRxy[L + lagOffset] := 0;
+    end;
+
+    ListBoxShiftedNorm.Items.Add(Format('%d   %8.3f', [L, ShiftedNormRxy[L + lagOffset]]));
+    SeriesShiftedNorm.AddXY(-L, ShiftedNormRxy[L + lagOffset]);
+  end;
+end;
+
+end.

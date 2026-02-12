@@ -1,0 +1,419 @@
+﻿unit Unit1;
+
+interface
+
+uses
+  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
+  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.ComCtrls, Vcl.StdCtrls,
+  VclTee.TeeGDIPlus, VCLTee.TeEngine, VCLTee.Series, Vcl.ExtCtrls,
+  VCLTee.TeeProcs, VCLTee.Chart, Vcl.Grids, SDL_matrix, Vcl.Buttons;
+
+type
+  TForm1 = class(TForm)
+    PageControl1: TPageControl;
+    tabLoadSignal: TTabSheet;
+    tabAutocorrelation: TTabSheet;
+    tabBuildMatrix: TTabSheet;
+    tabCoefficients: TTabSheet;
+    tabInverseFilter: TTabSheet;
+    tabPredictionSignal: TTabSheet;
+    tabCompare: TTabSheet;
+    tabMSE: TTabSheet;
+    btnLoadSignal: TButton;
+    lblSignalInfo: TLabel;
+    Label1: TLabel;
+    edtTimeLag: TEdit;
+    chartOriginalSignal: TChart;
+    Series1: TLineSeries;
+    FileOpenDialog: TOpenDialog;
+    btnCalcAutocorr: TButton;
+    lbAutocorrelation: TListBox;
+    btnBuildMatrix: TButton;
+    sgRxxMatrix: TStringGrid;
+    btnCalcCoeffs: TButton;
+    Label2: TLabel;
+    sgInverseMatrix: TStringGrid;
+    Label3: TLabel;
+    lbCoefficients: TListBox;
+    SDLMatrix1: TMatrix;
+    btnInverseFilter: TButton;
+    chartErrorSignal: TChart;
+    Series2: TLineSeries;
+    btnReconstruct: TButton;
+    chartReconstructedSignal: TChart;
+    Series3: TLineSeries;
+    btnCompare: TButton;
+    chartComparison: TChart;
+    Series4: TLineSeries;
+    Series5: TLineSeries;
+    btnCalcMSE: TButton;
+    lbMSEValues: TListBox;
+    lblFinalMSE: TLabel;
+    BitBtnExit: TBitBtn;
+    chartMSE: TChart;
+    BarSeries1: TBarSeries;
+    Series6: TLineSeries;
+    SDLMatrix2: TMatrix;
+    procedure btnLoadSignalClick(Sender: TObject);
+    procedure btnCalcAutocorrClick(Sender: TObject);
+    procedure btnBuildMatrixClick(Sender: TObject);
+    procedure btnCalcCoeffsClick(Sender: TObject);
+    procedure btnInverseFilterClick(Sender: TObject);
+    procedure btnReconstructClick(Sender: TObject);
+    procedure btnCompareClick(Sender: TObject);
+    procedure btnCalcMSEClick(Sender: TObject);
+    procedure BitBtnExitClick(Sender: TObject);
+  private
+    { Private declarations }
+    // Global variables to hold data across steps
+    x: TArray<Double>;         // Original signal
+    Ndata: Integer;            // Number of data points
+    P: Integer;                // Predictor Order, same as Time Lag
+    rxx: TArray<Double>;       // Autocorrelation values
+    Rxx_Matrix: TArray<TArray<Double>>; // Rxx Matrix
+    Rxx_Inverse: TArray<TArray<Double>>; // Inverse of Rxx Matrix
+    a_coeffs: TArray<Double>;  // Predictor coefficients
+    e_signal: TArray<Double>;  // Error signal
+    x_new: TArray<Double>;     // Reconstructed signal
+    error_model: TArray<Double>;
+  public
+    { Public declarations }
+  end;
+
+var
+  Form1: TForm1;
+
+implementation
+
+{$R *.dfm}
+
+procedure TForm1.btnLoadSignalClick(Sender: TObject);
+var
+  SignalFile: TStringList;
+  i: Integer;
+  line: string;
+  parts: TArray<string>;
+begin
+  if FileOpenDialog.Execute then
+  begin
+    SetLength(x, 0);
+    chartOriginalSignal.Series[0].Clear;
+    lbAutocorrelation.Clear;
+    sgRxxMatrix.RowCount := 1;
+    sgRxxMatrix.ColCount := 1;
+    sgInverseMatrix.RowCount := 1;
+    sgInverseMatrix.ColCount := 1;
+    lbCoefficients.Clear;
+    chartErrorSignal.Series[0].Clear;
+    chartReconstructedSignal.Series[0].Clear;
+    chartComparison.Series[0].Clear;
+    if chartComparison.SeriesCount > 2 then chartComparison.Series[2].Clear;
+    if chartComparison.SeriesCount > 1 then chartComparison.Series[1].Clear;
+    lbMSEValues.Clear;
+    lblFinalMSE.Caption := 'MSE: -';
+    chartMSE.Series[0].Clear;
+
+    SignalFile := TStringList.Create;
+    try
+      SignalFile.LoadFromFile(FileOpenDialog.FileName);
+      Ndata := SignalFile.Count;
+      SetLength(x, Ndata);
+      for i := 0 to Ndata - 1 do
+      begin
+        line := SignalFile[i];
+        parts := line.Split([#9]);
+        if Length(parts) = 2 then
+          x[i] := StrToFloat(parts[1]);
+      end;
+    finally
+      SignalFile.Free;
+    end;
+
+    for i := 0 to Ndata - 1 do
+    begin
+      chartOriginalSignal.Series[0].AddXY(i, x[i]);
+    end;
+
+    lblSignalInfo.Caption := Format('Loaded %d data points from %s', [Ndata, ExtractFileName(FileOpenDialog.FileName)]);
+    ShowMessage('Signal loaded. Please proceed to step 2.');
+    PageControl1.ActivePageIndex := 0;
+  end;
+end;
+
+procedure TForm1.btnCalcAutocorrClick(Sender: TObject);
+var
+  l, n: Integer;
+  sum: Double;
+begin
+  if Length(x) = 0 then
+  begin
+    ShowMessage('Please load a signal first (Step 1).');
+    Exit;
+  end;
+
+  try
+    P := StrToInt(edtTimeLag.Text);
+    if (P <= 0) or (P >= Ndata) then
+    begin
+      ShowMessage('Time Lag must be a positive integer less than data points.');
+      Exit;
+    end;
+  except
+    ShowMessage('Invalid value for Time Lag.');
+    Exit;
+  end;
+
+  SetLength(rxx, P + 1);
+  lbAutocorrelation.Clear;
+
+  for l := 0 to P do
+  begin
+    sum := 0.0;
+    for n := 0 to Ndata - 1 do
+    begin
+      if (n - l) >= 0 then
+        sum := sum + x[n] * x[n - l];
+    end;
+    rxx[l] := sum;
+    // FIX for W1057: Using Format instead of Str + concatenation
+    lbAutocorrelation.Items.Add(Format('rxx[%d] = %f', [l, rxx[l]]));
+  end;
+
+  ShowMessage('Autocorrelation complete. Please proceed to step 3.');
+  PageControl1.ActivePageIndex := 1;
+end;
+
+
+procedure TForm1.btnBuildMatrixClick(Sender: TObject);
+var
+  i, j: Integer;
+begin
+  if Length(rxx) = 0 then
+  begin
+    ShowMessage('Please calculate autocorrelation first (Step 2).');
+    Exit;
+  end;
+
+  SDLMatrix1.Resize(P, P);
+  sgRxxMatrix.ColCount := P;
+  sgRxxMatrix.RowCount := P;
+
+  for i := 1 to P do
+  begin
+    for j := 1 to P do
+    begin
+      SDLMatrix1.Elem[i, j] := rxx[Abs((i - 1) - (j - 1))];
+      // Using FloatToStr to avoid implicit cast
+      sgRxxMatrix.Cells[j-1, i-1] := FloatToStr(SDLMatrix1.Elem[i, j]);
+    end;
+  end;
+
+  ShowMessage('Rxx Matrix built. Please proceed to step 4.');
+  PageControl1.ActivePageIndex := 2;
+end;
+
+procedure TForm1.btnCalcCoeffsClick(Sender: TObject);
+var
+  i, k: Integer;
+  HasilKaliMatrik: Double;
+begin
+  // FIX for E2003: Changed .Rows to .RowCount
+  {if (SDLMatrix1.RowCount = 0) then
+  begin
+    ShowMessage('Please build the Rxx matrix first (Step 3).');
+    Exit;
+  end;}
+
+  // 1. Invert the matrix (stored in SDLMatrix1)
+  try
+    SDLMatrix1.Invert;
+  except
+    on E: Exception do
+    begin
+      ShowMessage('Matrix inversion failed: ' + E.Message);
+      Exit;
+    end;
+  end;
+
+  // 2. Display the inverted matrix
+  sgInverseMatrix.ColCount := P;
+  sgInverseMatrix.RowCount := P;
+  for i := 1 to P do
+    for k := 1 to P do
+    begin
+      sgInverseMatrix.Cells[k-1, i-1] := FloatToStr(SDLMatrix1.Elem[i, k]);
+    end;
+
+  // 3. Method for calculating coefficients
+  SDLMatrix2.Resize(1, P); // Matrix2.Resize(1, UkuranMatrik2)
+
+  SetLength(a_coeffs, P + 1);
+  lbCoefficients.Clear;
+
+  for i := 1 to P do
+  begin
+    HasilKaliMatrik := 0;
+    for k := 1 to P do
+    begin
+      HasilKaliMatrik := HasilKaliMatrik + (SDLMatrix1.Elem[k, i] * rxx[k]);
+    end;
+    a_coeffs[i] := HasilKaliMatrik;
+    // FIX for W1057
+    lbCoefficients.Items.Add(Format('a[%d] = %f', [i, a_coeffs[i]]));
+  end;
+
+  ShowMessage('Predictor coefficients calculated. Please proceed to step 5.');
+  PageControl1.ActivePageIndex := 3;
+end;
+
+procedure TForm1.btnInverseFilterClick(Sender: TObject);
+var
+  m, k: Integer;
+  x_hat: Double;
+  a_inv: TArray<Double>;
+begin
+  if Length(a_coeffs) = 0 then
+  begin
+    ShowMessage('Please calculate coefficients first (Step 4).');
+    Exit;
+  end;
+
+  SetLength(a_inv, P + 1);
+  for k := 1 to P do
+  begin
+    a_inv[k] := -a_coeffs[k];
+  end;
+
+  SetLength(e_signal, Ndata);
+  chartErrorSignal.Series[0].Clear;
+  chartComparison.Series[2].Title := 'Excitation e(m)';
+  chartComparison.Series[2].Clear;
+
+  for m := 0 to Ndata - 1 do
+  begin
+    x_hat := 0.0;
+    for k := 1 to P do
+    begin
+      if (m - k) >= 0 then
+      begin
+        x_hat := x_hat + (a_inv[k] * x[m - k]);
+      end;
+    end;
+    e_signal[m] := x[m] + x_hat;
+    chartErrorSignal.Series[0].AddXY(m, e_signal[m]);
+    chartComparison.Series[2].AddXY(m, e_signal[m]);
+  end;
+
+  ShowMessage('Error signal e(m) generated. Please proceed to step 6.');
+  PageControl1.ActivePageIndex := 4;
+end;
+
+
+procedure TForm1.btnReconstructClick(Sender: TObject);
+var
+  m, k: Integer;
+  sum2: Double;
+begin
+  if Length(e_signal) = 0 then
+  begin
+    ShowMessage('Please generate the error signal first (Step 5).');
+    Exit;
+  end;
+
+  SetLength(x_new, Ndata);
+  chartReconstructedSignal.Series[0].Clear;
+
+  for m := 0 to Ndata - 1 do
+  begin
+    sum2 := 0.0;
+    for k := 1 to P do
+    begin
+      if (m - k) >= 0 then
+      begin
+        sum2 := sum2 + a_coeffs[k] * x[m - k];
+      end;
+    end;
+    x_new[m] := sum2 + e_signal[m];
+    chartReconstructedSignal.Series[0].AddXY(m, x_new[m]);
+  end;
+
+  ShowMessage('Prediction signal reconstructed. Please proceed to step 7.');
+  PageControl1.ActivePageIndex := 5;
+end;
+
+
+procedure TForm1.btnCompareClick(Sender: TObject);
+var
+  i: Integer;
+begin
+  if (Length(x) = 0) or (Length(x_new) = 0) then
+  begin
+    ShowMessage('Please load and reconstruct the signal first.');
+    Exit;
+  end;
+
+  chartComparison.Series[0].Clear;
+  chartComparison.Series[1].Clear;
+  chartComparison.Series[0].Title := 'Original (x_old)';
+  chartComparison.Series[1].Title := 'Reconstructed (x_new)';
+
+  for i := 0 to Ndata - 1 do
+  begin
+    chartComparison.Series[0].AddXY(i, x[i]);
+    chartComparison.Series[1].AddXY(i, x_new[i]);
+  end;
+
+  PageControl1.ActivePageIndex := 6;
+end;
+
+procedure TForm1.btnCalcMSEClick(Sender: TObject);
+var
+  m: Integer;
+  sse, mse: Double;
+begin
+  if (Length(x) = 0) or (Length(x_new) = 0) then
+  begin
+    ShowMessage('Please compare the signals first (Step 7).');
+    Exit;
+  end;
+
+  SetLength(error_model, Ndata);
+  sse := 0.0;
+  lbMSEValues.Clear;
+  chartMSE.Series[0].Clear;
+
+  for m := 0 to Ndata - 1 do
+  begin
+    error_model[m] := Abs(x[m] - x_new[m]);
+    chartMSE.Series[0].Add(error_model[m]);
+    // FIX for W1057
+    lbMSEValues.Items.Add(Format('err_model[%d] = %g', [m, error_model[m]]));
+  end;
+
+  sse := 0.0;
+  for m := 0 to Ndata - 1 do
+  begin
+    sse := sse + Sqr(x[m] - x_new[m]);
+  end;
+
+  if Ndata > 0 then
+  begin
+    mse := (1 / Ndata) * sse;
+  end
+  else
+  begin
+    mse := 0.0;
+  end;
+
+  lblFinalMSE.Caption := Format('Final Mean Squared Error (MSE): %g', [mse]);
+  ShowMessage('MSE calculation complete.');
+  PageControl1.ActivePageIndex := 7;
+end;
+
+
+procedure TForm1.BitBtnExitClick(Sender: TObject);
+begin
+  Close;
+end;
+
+end.
